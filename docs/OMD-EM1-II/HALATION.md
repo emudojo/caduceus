@@ -75,7 +75,14 @@ E-M1 II disassembly.
 - **Flag hook `0x604228fc`**: stock `fa438c5ea000` (`movbu (24204,a3),d0; cmp 0,d0`), back at the `bne` `0x60422902`;
   a 6-byte `jmp d32; nop` fits as on the E-P7.
 - **Soft Focus blend setup `0x60398ee1`** (not `0x6039517c`), pushed only from `0x60393a6b` under `btst 128` on job+16
-  at `0x603939ff`; blend-setup hook `0x60398f5f` (same 6 bytes as the E-P7).
+  at `0x603939ff`; blend-setup hook `0x60398f5f` (same 6 bytes as the E-P7). **Emulated**
+  (`tools/omdem1mk2_emu_blend_setup.py`, entered with `calls` like a work-list item): finds records 0x1000 / 0x1061
+  (bufidx), inits the request at **job+11364**, writes stage 0xf005 (+12) and effect 0x0402 (+656), copies both
+  records to +20 / +84, describes the output at +340 (format 0x302, stride = width rounded up to 32, width, height) and
+  queues it; the selector maps that request to combiner 11; at `0x60398f5f` a2 = request, a3 = record 0x1000; without
+  record 0x1061 it returns 48 and writes nothing. Allocation, queue submit and release are frame-correct fixtures.
+- **Gate design consequence:** the combiner stub gets ctx+4 = request = job+11364, so it can find the job itself
+  (request − 11364) and test a per-job mark set by the flag hook, instead of a global flag that another job could see.
 - **Combiners:** dispatcher `0x603dcd0c` (bank init, then `0x603dcd35`) → selector `0x603f1653` → table `0x6053e108`
   {id, handler}. For a kind-3 request the selector reads the effect code at **request+656**: 0x0402 → 11, 0x0403 → 12
   (effect table `0x6054c97c`, key = effect − 259). Combiner 11 `0x603dd06f` (word `0x6053e164`), 12 `0x603dd0b8` (word
@@ -133,6 +140,6 @@ need confirmation before deciding whether to change the timeout.
 1. Code space: confirmed with the sp1 loaded-end probe above.
 2. Find the spare remembered setting and the Soft Focus / CPU-pass sites; emulator fixtures for the capture job.
    Sites: done (static, above). Emulated: flag converter, stage setting sid 961, capture-kind mapper, selector +
-   combiner 11/12 with the neutral-blend stubs. Left: the blend setup `0x60398ee1` and the mapper `0x6006888f` ranges.
+   combiner 11/12 with the neutral-blend stubs, blend setup. Left: the mapper `0x6006888f` ranges (CPU pass, step 4).
 3. Bloom route (useful alone, and it provides the finished YCbCr buffer), one camera test.
 4. Halation pass with the global stage and gate above, then the camera control; emulator proof as in §"How", then camera.

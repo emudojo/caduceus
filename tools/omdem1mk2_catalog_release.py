@@ -109,7 +109,8 @@ def validate(spec_path, version):
     ])
     run('emu_rules', '-', expected=['offered values: [1, 2, 3, 4, 9]'])
     run('emu_rules', spec_path, expected=['offered values: [1, 2, 3, 4, 6, 7, 9]'])
-    for tool in ('emu_aspect', 'emu_fixed_patches', 'emu_sdload', 'emu_af', 'emu_artflags', 'emu_capture_kind', 'emu_combiner'):
+    for tool in ('emu_aspect', 'emu_fixed_patches', 'emu_sdload', 'emu_af', 'emu_artflags', 'emu_capture_kind', 'emu_combiner',
+                 'emu_blend_setup'):
         run(tool, spec_path)
     if version == COLOR_CREATOR_VERSION:
         run('emu_color_creator', spec_path)

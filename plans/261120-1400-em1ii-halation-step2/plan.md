@@ -16,4 +16,4 @@ Constraints: AGENTS.md (emulate before any camera build; shared look format), do
 decisions. Releases are sealed with `tools/omdem1mk2_catalog_release.py` on the OM catalog stock `691a8a8e…`.
 
 Update 2026-11-20: combiner 11/12 + neutral-blend stubs and the capture-kind mapper emulated
-(`emu_combiner`, `emu_capture_kind`, both in the release checks). Left for step 2: blend setup 0x60398ee1, mapper ranges.
+(`emu_combiner`, `emu_capture_kind`, both in the release checks). Then the blend setup 0x60398ee1 (emu_blend_setup). Left for step 2: the mapper 0x6006888f ranges.
