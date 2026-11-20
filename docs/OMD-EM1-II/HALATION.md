@@ -76,9 +76,20 @@ E-M1 II disassembly.
   a 6-byte `jmp d32; nop` fits as on the E-P7.
 - **Soft Focus blend setup `0x60398ee1`** (not `0x6039517c`), pushed only from `0x60393a6b` under `btst 128` on job+16
   at `0x603939ff`; blend-setup hook `0x60398f5f` (same 6 bytes as the E-P7).
-- **Combiners:** dispatcher `0x603dcd35` → selector `0x603f1653` → table `0x6053e108` {id, handler}. Combiner 11
-  `0x603dd06f` (word `0x6053e164`), 12 `0x603dd0b8` (word `0x6053e16c`). **No weight getter on this body:** 11/12 use
-  the constants 600 / 424, so the neutral blend needs the two table words repointed to small stubs (data edits).
+- **Combiners:** dispatcher `0x603dcd0c` (bank init, then `0x603dcd35`) → selector `0x603f1653` → table `0x6053e108`
+  {id, handler}. For a kind-3 request the selector reads the effect code at **request+656**: 0x0402 → 11, 0x0403 → 12
+  (effect table `0x6054c97c`, key = effect − 259). Combiner 11 `0x603dd06f` (word `0x6053e164`), 12 `0x603dd0b8` (word
+  `0x6053e16c`); both write the bank at (ctx+8)+7364 and end in the shared tail `0x603dd518`. **No weight getter on
+  this body:** 11/12 use the constants 600 / 424. **Emulated** (`tools/omdem1mk2_emu_combiner.py`): stock selects
+  11/12 and writes +92 = 600|600<<16, +96 = 600, +136 = 424|424<<16, +140 = 424 (12 swapped). The neutral-blend design
+  is proven with the prototype stubs `tools/emu_fixtures/em1_combiner_neutral.s` behind the two repointed table words
+  (4-byte data edits): gate off = the stock bank byte for byte, gate on = w 1024 (11: A 1024 / B 0; 12: A 0 / B 1024)
+  with every other bank word unchanged, combiners 9/10 untouched. The real gate (which job halation marked) is step 4.
+  Lesson kept in the fixture: a helper the stub `call`s must have a non-zero frame (`[],4`), or its own nested `call`
+  overwrites the return slot (the emulator caught this as an endless loop).
+- **Capture kind [E]:** mapper `0x6042257f` (`tools/omdem1mk2_emu_capture_kind.py`): request+194 0x2001 / 0x2006 →
+  type 0x110 / 0x120 (by request+206; 0x1000 if helper `0x60425e48` returns 1), 0x1008 / 0x1006 → 0, any other kind →
+  0x1000. So the gate can test request+194 directly against the four excluded kinds, as on the E-P7.
 - **CPU pass (grain_cpu r2):** bufidx `0x6038c01c`, lock/unlock `0x6006e9d0` / `0x6006ea19`, flush `0x60068709`,
   modeget/modeset `0x60068b78` / `0x60068b88`, malloc/free `0x600231fe` / `0x6002323d`. The mapper `0x6006888f`
   refuses bus addresses below 0x84000000 and 0xa0000000..0xafffffff (the E-P7 treated < 0xb0000000 as direct): its
@@ -121,7 +132,7 @@ need confirmation before deciding whether to change the timeout.
 
 1. Code space: confirmed with the sp1 loaded-end probe above.
 2. Find the spare remembered setting and the Soft Focus / CPU-pass sites; emulator fixtures for the capture job.
-   Sites: done (static, above); flag converter emulated. Next: the spare setting, then the kind mapper, selector +
-   combiner 11/12 stubs and the blend setup in the emulator.
+   Sites: done (static, above). Emulated: flag converter, stage setting sid 961, capture-kind mapper, selector +
+   combiner 11/12 with the neutral-blend stubs. Left: the blend setup `0x60398ee1` and the mapper `0x6006888f` ranges.
 3. Bloom route (useful alone, and it provides the finished YCbCr buffer), one camera test.
 4. Halation pass with the global stage and gate above, then the camera control; emulator proof as in §"How", then camera.

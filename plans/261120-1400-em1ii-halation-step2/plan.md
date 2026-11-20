@@ -14,3 +14,6 @@ Reports: `plans/reports/research-261120-1400-em1ii-spare-setting.md`,
 
 Constraints: AGENTS.md (emulate before any camera build; shared look format), docs/OMD-EM1-II/HALATION.md owner
 decisions. Releases are sealed with `tools/omdem1mk2_catalog_release.py` on the OM catalog stock `691a8a8e…`.
+
+Update 2026-11-20: combiner 11/12 + neutral-blend stubs and the capture-kind mapper emulated
+(`emu_combiner`, `emu_capture_kind`, both in the release checks). Left for step 2: blend setup 0x60398ee1, mapper ranges.
