@@ -169,6 +169,16 @@ behavior and rendered photos still need camera testing. v0.4c17 also checks card
 opening Color Creator. If `C1` first appears while the editor is open, reopen Color Creator to switch to
 the first card look. Until then, the editor and SCP label continue to show the active built-in look.
 
+**Why the catalog stock loads less (static, 2026-11-20).** The two 3.70 files differ in Section 1 content, not only
+in its end word. In `f0c25dd8…` a function started at `0x60256ff0` after linker padding and ran to about `0x60257578`
+(end word `0x60257800`). In `691a8a8e…` everything from `0x60256ce8` is `0xFF` and the end word is `0x60257000`: OM
+dropped that function and the linker rounded the section end down. In the catalog image nothing uses
+`0x60256ce8..0x602577ff`: the only 32-bit value in `0x60257000..0x60257fff` (cached, uncached `0xa…` and `0x8…`
+aliases) that is an instruction operand is the end word `0x60042b4d` itself, and no relative `call`/`jmp`/`calls`
+targets the range (the five byte-pattern hits are inside `mov imm32` operands or ASCII / string-pointer tables). So
+loading the 2 KiB again overwrites only padding. Still unproven: that no code computes an address there at run time
+(the camera boot + 65:24 test).
+
 The release was sealed with `python3 tools/omdem1mk2_catalog_release.py --stock PATH --version v0.4c17` after
 rebuilding the wheel edits with `python3 patches/omdem1mk2/color_creator_wheel/build.py`. The sealer uses the MN103
 emulator and cross-toolchain and creates a fresh release directory. To repeat the focused check on an existing release,

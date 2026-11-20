@@ -62,6 +62,33 @@ brightness, gradual daylight fade; credit in NOTICE).
   The owner also reported `S+` after a power cycle and a movie.
 - The 162 KB gap after section 4 can be probed the same way when needed.
 
+## Step 2: E-M1 II sites (2026-11-20, static unless marked)
+
+Full table and evidence: [`plans/reports/research-261120-1400-em1ii-softfocus-cpupass-sites.md`](../../plans/reports/research-261120-1400-em1ii-softfocus-cpupass-sites.md).
+The E-P7 image was not available locally, so every match is from the E-P7 patch sources and docs, checked on the
+E-M1 II disassembly.
+
+- **Flag converter `0x6042285e`** (E-P7 `0x603eab39`): request +28 → capture; Art Effect byte capture+24951 → jump
+  table `0x60556bfc` (1 → 0x80 Soft Focus, 2 → 0x400, 3 → 0x8000, 4 → 0x2000, 5 → 0x40, 6/7 → 0x100/0x200,
+  8/9 → 0x800/0x1000); clears 0x4000 / 0x10000; sets 0x200000 from capture+24204 | +24205. **Emulated**
+  (`tools/omdem1mk2_emu_artflags.py`, 160 cases, stock and v0.4c17; part of the release checks).
+- **Flag hook `0x604228fc`**: stock `fa438c5ea000` (`movbu (24204,a3),d0; cmp 0,d0`), back at the `bne` `0x60422902`;
+  a 6-byte `jmp d32; nop` fits as on the E-P7.
+- **Soft Focus blend setup `0x60398ee1`** (not `0x6039517c`), pushed only from `0x60393a6b` under `btst 128` on job+16
+  at `0x603939ff`; blend-setup hook `0x60398f5f` (same 6 bytes as the E-P7).
+- **Combiners:** dispatcher `0x603dcd35` → selector `0x603f1653` → table `0x6053e108` {id, handler}. Combiner 11
+  `0x603dd06f` (word `0x6053e164`), 12 `0x603dd0b8` (word `0x6053e16c`). **No weight getter on this body:** 11/12 use
+  the constants 600 / 424, so the neutral blend needs the two table words repointed to small stubs (data edits).
+- **CPU pass (grain_cpu r2):** bufidx `0x6038c01c`, lock/unlock `0x6006e9d0` / `0x6006ea19`, flush `0x60068709`,
+  modeget/modeset `0x60068b78` / `0x60068b88`, malloc/free `0x600231fe` / `0x6002323d`. The mapper `0x6006888f`
+  refuses bus addresses below 0x84000000 and 0xa0000000..0xafffffff (the E-P7 treated < 0xb0000000 as direct): its
+  range logic must be re-derived. The work-list builder `0x60392e0d` writes items inline (no wl_final / wl_attach),
+  so the E-P7 plain-look grain route does not port; halation goes through flag 0x80 + the blend word instead.
+- **Capture fields do not shift uniformly:** picture mode +24203, profile +24233 (+150 vs E-P7) but Art Effect +24951
+  (+166). Capture kinds 0x2001 / 0x2006 / 0x1008 / 0x1006 appear unchanged in the kind mapper `0x6042257f`.
+- Still open: Monotone's picture-mode value, the job key of stock colour modes, the mapper's 0 return, and the spare
+  remembered setting (separate report).
+
 ## Stock watchdog write path (2026-11-20)
 
 The OM 3.70 stock path at `0x6005aecc` passes 10 to `0x600226fd`. The emulator ran that stock call with
@@ -74,5 +101,7 @@ need confirmation before deciding whether to change the timeout.
 
 1. Code space: confirmed with the sp1 loaded-end probe above.
 2. Find the spare remembered setting and the Soft Focus / CPU-pass sites; emulator fixtures for the capture job.
+   Sites: done (static, above); flag converter emulated. Next: the spare setting, then the kind mapper, selector +
+   combiner 11/12 stubs and the blend setup in the emulator.
 3. Bloom route (useful alone, and it provides the finished YCbCr buffer), one camera test.
 4. Halation pass with the global stage and gate above, then the camera control; emulator proof as in §"How", then camera.
