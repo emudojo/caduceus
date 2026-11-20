@@ -1,0 +1,27 @@
+{
+ "patch": "halation",
+ "force_stage": 0,
+ "edits": [
+  {
+   "kind": "0x100",
+   "addr": "0x60042b6d",
+   "expect": "00702e61",
+   "new": "00003061",
+   "why": "halation: section 6 loaded end 0x612e7000 -> 0x61300000 (as space probe sp1)"
+  },
+  {
+   "kind": "0x100",
+   "addr": "0x612e7000",
+   "expect": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+   "new": "9396f8231cfa407761a000c94bfa408b5ea064c643a005c83fa00cc83bfa63c200fac80120c831fac80620c82bfac80810c825fac80610c81ffccc09f70000049000dd8d76d7fec00ca000c80ba003c50772f8e48062f82f1c257761dc09b813ff",
+   "why": "halation flag gate hl_flag (97 B, stage from sid 961)"
+  },
+  {
+   "kind": "0x100",
+   "addr": "0x6042285e",
+   "expect": "f82c1c96257761",
+   "new": "dca247ec00cbcb",
+   "why": "halation: flag converter entry -> hl_flag (jmp; nop; nop)"
+  }
+ ]
+}

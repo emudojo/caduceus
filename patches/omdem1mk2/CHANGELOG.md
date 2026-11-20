@@ -5,6 +5,16 @@ Container update package: `E1259999.BIN` (93,050,944 bytes) installed via `DCOLY
 
 ---
 
+## v0.4c18t — 2026-11-20 (halation step 3 camera-test build; emulator-checked, not camera-tested)
+
+- **Test build, not for everyday use.** Ordinary colour stills (any colour picture mode, not Monotone, not an Art
+  Filter, no Art Effect, not the four special capture kinds) get the camera's own Soft Focus blend: a soft, neutral
+  glow. The stage is fixed at 2 because no control sets it yet; in this step the stage only switches the route on,
+  so any value looks the same. The look-coloured (red / amber …) halation and the strength steps are step 4.
+- Same as v0.4c17 otherwise. To go back, flash v0.4c17 or the stock restore file.
+- Emulator: the gate through the real flag converter (1,260 runs, stage / Art Effect / picture mode / capture kind),
+  plus every v0.4c17 check. See `docs/OMD-EM1-II/HALATION.md` "Step 3" for what to look at on the camera.
+
 ## v0.4c17 — 2026-11-20 (emulator-checked test release)
 
 - Loading a card pack after opening Color Creator keeps the built-in look active until the editor is reopened.

@@ -19,6 +19,8 @@ from omdem1mk2_layout import BASE, loaded_sections
 BASE_RELEASE = 'v0.4c15'
 VERSION = 'v0.4c16'
 COLOR_CREATOR_VERSION = 'v0.4c17'
+HALATION_TEST_VERSION = 'v0.4c18t'      # v0.4c17 + halation step 3 with a fixed stage (camera test only)
+HALATION_EDITS = ROOT / 'patches/omdem1mk2/halation/edits.json'
 CAMERA = 'em1mk2'
 CATALOG_SECTION_END = 0x60257000
 ASPECT_SECTION_END = 0x60257800
@@ -84,6 +86,14 @@ def replace_color_creator_edits(spec):
     return {**spec, 'version': COLOR_CREATOR_VERSION, 'edits': merged}
 
 
+def halation_test_spec(spec):
+    patch = json.loads(HALATION_EDITS.read_text(encoding='utf-8'))
+    if patch.get('force_stage') not in (1, 2, 3):
+        raise ValueError('Build the halation test edits with EM1_HL_FORCE_STAGE=1..3 before sealing ' + HALATION_TEST_VERSION)
+    return {**spec, 'version': HALATION_TEST_VERSION, 'halation_force_stage': patch['force_stage'],
+            'edits': [*patch['edits'], *spec['edits']]}
+
+
 def validate(spec_path, version):
     checked = []
 
@@ -112,8 +122,11 @@ def validate(spec_path, version):
     for tool in ('emu_aspect', 'emu_fixed_patches', 'emu_sdload', 'emu_af', 'emu_artflags', 'emu_capture_kind', 'emu_combiner',
                  'emu_blend_setup', 'emu_mapper'):
         run(tool, spec_path)
-    if version == COLOR_CREATOR_VERSION:
+    if version in (COLOR_CREATOR_VERSION, HALATION_TEST_VERSION):
         run('emu_color_creator', spec_path)
+    if version == HALATION_TEST_VERSION:
+        stage = json.loads(Path(spec_path).read_text(encoding='utf-8'))['halation_force_stage']
+        run('emu_halation_flag', spec_path, '--force-stage', stage)
     # Both releases preserve the camera-tested v0.4c15 aspect assets byte for byte.
     run('emu_scp', spec_path, '--reference', ROOT / 'releases' / CAMERA / BASE_RELEASE / 'edits.json')
     return sorted(set(checked))
@@ -129,8 +142,10 @@ def seal(stock_path, version):
     legacy, _, card, cam = caduceus.load_release(BASE_RELEASE, CAMERA)
     main = extract_for_build(stock)
     spec = catalog_spec(legacy, main)
-    if version == COLOR_CREATOR_VERSION:
+    if version in (COLOR_CREATOR_VERSION, HALATION_TEST_VERSION):
         spec = replace_color_creator_edits(spec)
+    if version == HALATION_TEST_VERSION:
+        spec = halation_test_spec(spec)
     with tempfile.TemporaryDirectory(prefix='.catalog-release-', dir=destination.parent) as tmp:
         staging = Path(tmp) / version
         staging.mkdir()
@@ -173,7 +188,7 @@ def seal(stock_path, version):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--stock', type=Path, required=True)
-    parser.add_argument('--version', choices=(VERSION, COLOR_CREATOR_VERSION), default=VERSION)
+    parser.add_argument('--version', choices=(VERSION, COLOR_CREATOR_VERSION, HALATION_TEST_VERSION), default=VERSION)
     args = parser.parse_args()
     try:
         seal(args.stock, args.version)

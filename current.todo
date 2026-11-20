@@ -175,9 +175,12 @@ wheel's vividness also stays 0, that is a separate symptom.
   needs a camera test. Emulated too: capture-kind mapper 0x6042257f (emu_capture_kind), combiner 11/12 selection and
   the neutral-blend table-word stubs (emu_combiner), blend setup 0x60398ee1 (emu_blend_setup; request = job+11364, so
   the combiner stub can find its job), mapper 0x6006888f address map (emu_mapper). Step 2 done.
-* Step 3 (next): bloom route on its own: flag hook at 0x604228fc adds 0x80 for the gated shots, per-job mark, combiner
-  stubs; emulate the hook + gate for every picture mode / capture kind before one camera test.
-* Step 3: bloom route (one camera test). Step 4: halation pass + gate + Halo row in color_creator_wheel, emulated first.
+* Step 3 (built, emulated; camera test pending): patches/omdem1mk2/halation hooks the flag converter entry 0x6042285e
+  and adds 0x80 for gated colour stills (stage sid 961 1..3, no Art Effect, mode < 100 and not 5 / 12, kind not
+  excluded); tools/omdem1mk2_emu_halation_flag.py. Test release v0.4c18t (stage fixed at 2): soft neutral glow on
+  colour stills; check Monotone / Art Filter / Art Effect stay stock, bursts, RAW+JPEG, movie, no restart.
+* Step 4: per-job mark + combiner 11/12 stubs (strength, neutral blend), halation pass on the CPU (mapper map above),
+  look tint, Halo row in color_creator_wheel writing sid 961; each emulated first.
 * Code goes in the 100 KB region; the 162 KB gap 0x60bc8800..0x60bf1000 can be probed the same way if needed.
 
 ### Priority 3: aspect, still untested on camera

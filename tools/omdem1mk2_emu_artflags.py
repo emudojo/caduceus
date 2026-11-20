@@ -41,9 +41,16 @@ def expected(art, hook_a, hook_b, seed):
     return flags & 0xFFFFFFFF
 
 
+MONOTONE = 5
+PICTURE_MODE = 24203
+
+
 def run(img, art, hook_a, hook_b, seed):
     capture = bytearray(CAPTURE_SIZE)
     capture[ART], capture[HOOK_A], capture[HOOK_B] = art, hook_a, hook_b
+    # Picture mode Monotone: the stock converter never reads it, and it keeps the halation gate (which hooks this
+    # converter's entry, tools/omdem1mk2_emu_halation_flag.py) off, so a release with halation must match the table.
+    capture[PICTURE_MODE] = MONOTONE
     request = bytearray(0x100)
     struct.pack_into('<I', request, 28, CAPTURE)
     # call 0x6042285e,[a2,a3],20 -- the frame both stock callers (0x6041dde2, 0x60420af1) use; then halt.

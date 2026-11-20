@@ -137,6 +137,32 @@ Report: [`plans/reports/research-261120-1400-em1ii-spare-setting.md`](../../plan
   hue. Fallbacks: sid 981 (`0xF779[2]`, 0..3, default 1, one reader in the mode-12 mono branch) and 965.
 - **Camera test needed:** set the stage, power off and on, read it back.
 
+## Step 3: Soft Focus route for colour stills (2026-11-20, emulated; not camera-tested)
+
+Patch `patches/omdem1mk2/halation` (`hl_flag.s`, `build.py`):
+
+- **Code space:** section 6 loaded end `0x612e7000 → 0x61300000` (word `0x60042b6d`, the sp1 edit, camera S+); `hl_flag`
+  (97 B) at `0x612e7000`.
+- **Hook at the converter entry `0x6042285e`**, not at `0x604228fc`: at the entry a0 is still the request (capture kind
+  at +194), later it is overwritten. The first 7 bytes (`mov (28,a0),a3; mov a1,a2; mov 24951,a1`, absolute, no branch
+  lands inside) become `jmp hl_entry; nop; nop`; `hl_flag` replays them and returns to `0x60422865`.
+- **Gate:** stage (sid 961 via the stock property getter `0x6005e6cf(0xF709, 0, a0 = 0)`, as stock `0x604226d2` calls
+  it) is 1..3 (anything else Off), Art Effect byte capture+24951 = 0, picture mode capture+24203 < 100 and not 5
+  (Monotone) or 12 (MONO) — the stock mono test `0x60342c32` returns 1 for 5, 12, 104 and 109/variant 2 — and the
+  capture kind is not 0x2001 / 0x2006 / 0x1008 / 0x1006. Then flag 0x80 is ORed in; nothing else changes.
+- **What it does in step 3:** the stock Soft Focus blend (combiner 11/12, weight 600 / 424, a neutral glow) runs on
+  gated stills. The stage only switches it; strength and the look's glow colour are step 4 (combiner stubs + pass).
+- **Emulated** (`tools/omdem1mk2_emu_halation_flag.py`): the real settings store holds the stage in sid 961 (written
+  through the facade), the patched converter reads it back; 1,260 runs over stage 0..3 / 7 × Art Effect × picture
+  mode × capture kind × seed give exactly the stock flag word, plus 0x80 in the 36 gated cases. A build with the
+  stage fixed (`EM1_HL_FORCE_STAGE`) passes with `--force-stage` and fails the sid-961 check, so the harness sees the
+  stage. `emu_artflags` keeps the stock flag table for every Art Effect (gate off through Monotone).
+- **Test release `v0.4c18t`** (stage fixed at 2 because no control sets sid 961 yet): `tools/omdem1mk2_catalog_release.py
+  --version v0.4c18t` after `EM1_HL_FORCE_STAGE=2 python3 patches/omdem1mk2/halation/build.py`.
+- **Camera test (when available):** Natural / Vivid / Color Creator stills show a soft glow; Monotone, an Art Filter and
+  an Art Effect shot look stock; bursts, RAW+JPEG and movie still work; no slowdown or restart. Then flash v0.4c17
+  back (or the next build) — the test release turns the glow on for every colour still.
+
 ## Stock watchdog write path (2026-11-20)
 
 The OM 3.70 stock path at `0x6005aecc` passes 10 to `0x600226fd`. The emulator ran that stock call with
@@ -150,7 +176,7 @@ need confirmation before deciding whether to change the timeout.
 1. Code space: confirmed with the sp1 loaded-end probe above.
 2. Find the spare remembered setting and the Soft Focus / CPU-pass sites; emulator fixtures for the capture job.
    Sites: done (static, above). Emulated: flag converter, stage setting sid 961, capture-kind mapper, selector +
-   combiner 11/12 with the neutral-blend stubs, blend setup, bus-address mapper. **Step 2 done** (the per-job gate,
-   the hooks and the pass itself are step 3–4 work, each emulated before a camera build).
+   combiner 11/12 with the neutral-blend stubs, blend setup, bus-address mapper. **Step 2 done.**
+3. Step 3 built and emulated (above); test release `v0.4c18t` awaits the camera.
 3. Bloom route (useful alone, and it provides the finished YCbCr buffer), one camera test.
 4. Halation pass with the global stage and gate above, then the camera control; emulator proof as in §"How", then camera.

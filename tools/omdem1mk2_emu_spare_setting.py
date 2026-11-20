@@ -49,7 +49,8 @@ class Emu(R.Emu):
             self.write(slot, struct.pack('<I', self.call(0x6005E6A5, 0x00, 4, {'d0': key})['a0']))
         self.write(FACADE_OBJ, struct.pack('<II', 0, 0x627FD000))
 
-    def call(self, target, mask, frame, regs):
+    def call(self, target, mask, frame, regs, extra=()):
+        """Run `target` from a synthetic caller. `extra` regions are added; captured ones land in self.captured."""
         if mask is None:   # `calls` target (no register mask)
             code, stop = b'\xfc\xff' + struct.pack('<i', target - V.CALLER) + b'\xcb', V.CALLER + 6
         else:
@@ -67,11 +68,13 @@ class Emu(R.Emu):
                    Region('cpuid', 0x8050, bytes(4), 'r'),
                    Region('data', 0x61F7D540, self.img[0x60258000 - V.B:0x602AE000 - V.B], 'rw'),
                    Region('hwsem', 0x8FDFF000, bytes(0x2000), 'rw'),
-                   Region('heap', 0x61A00000, bytes(0x57D000), 'rw')]
+                   Region('heap', 0x61A00000, bytes(0x57D000), 'rw'), *extra]
         r = execute(regions, dict({'sp': V.SP, 'pc': V.CALLER}, **regs), stop, limit=20_000_000)
         if r['fault'] or r['registers']['pc'] != stop:
             raise SystemExit(f'call {target:#x} stopped at {r["registers"]["pc"]:#x}: {r["fault"]}')
-        self.ram = bytes.fromhex(r['memory'][0]['hex'])
+        captured = {c['name']: bytes.fromhex(c['hex']) for c in r['memory']}
+        self.ram = captured.pop('ram')
+        self.captured = captured
         return r['registers']
 
     def _offset(self, addr):
