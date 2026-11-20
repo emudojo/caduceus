@@ -98,9 +98,19 @@ E-M1 II disassembly.
   type 0x110 / 0x120 (by request+206; 0x1000 if helper `0x60425e48` returns 1), 0x1008 / 0x1006 → 0, any other kind →
   0x1000. So the gate can test request+194 directly against the four excluded kinds, as on the E-P7.
 - **CPU pass (grain_cpu r2):** bufidx `0x6038c01c`, lock/unlock `0x6006e9d0` / `0x6006ea19`, flush `0x60068709`,
-  modeget/modeset `0x60068b78` / `0x60068b88`, malloc/free `0x600231fe` / `0x6002323d`. The mapper `0x6006888f`
-  refuses bus addresses below 0x84000000 and 0xa0000000..0xafffffff (the E-P7 treated < 0xb0000000 as direct): its
-  range logic must be re-derived. The work-list builder `0x60392e0d` writes items inline (no wl_final / wl_attach),
+  modeget/modeset `0x60068b78` / `0x60068b88`, malloc/free `0x600231fe` / `0x6002323d`.
+- **Mapper `0x6006888f` [E]** (`tools/omdem1mk2_emu_mapper.py`, 144 cases, CPU ids 0..2). The E-P7 treated every
+  address below 0xb0000000 as direct; this body differs:
+  - **Refused, use directly:** addresses below 0x84000000 and 0xa0000000..0xafffffff. The mapper prints
+    `[exad]change_addr_err!!` (`0x60023188`, a log, not a stop), returns 0 and does not lock.
+  - **Windowed:** every other address. It locks (`0x6006e9d0`), flushes (`0x60068709`), maps the bucket holding the
+    address (0x84..0x87 is 64 MB, the rest 128 MB) into this CPU's window and returns `0xb0000000 | (addr & 0x07ffffff)`
+    (`0xb8000000 | …` for 0x98..0x9f and 0xf8..0xff). It writes the bucket code (0x1000, 0x2100, 0x3200, 0x7600,
+    0x8700 … 0xfe00) into the window registers `0x98100058` / `0x9810004c` (+0x400 per CPU, low byte kept), stores a
+    mode 0..11 in `0xa274d410[cpu]`, then unlocks with the lock's token.
+  - **For the halation pass:** test the buffer address first; use refused-range addresses as they are, and call the
+    mapper only for the others. One window per CPU at a time, so a pass that walks two buffers in different buckets
+    must remap between them (or copy through a direct buffer). The work-list builder `0x60392e0d` writes items inline (no wl_final / wl_attach),
   so the E-P7 plain-look grain route does not port; halation goes through flag 0x80 + the blend word instead.
 - **Capture fields do not shift uniformly:** picture mode +24203, profile +24233 (+150 vs E-P7) but Art Effect +24951
   (+166). Capture kinds 0x2001 / 0x2006 / 0x1008 / 0x1006 appear unchanged in the kind mapper `0x6042257f`.
@@ -140,6 +150,7 @@ need confirmation before deciding whether to change the timeout.
 1. Code space: confirmed with the sp1 loaded-end probe above.
 2. Find the spare remembered setting and the Soft Focus / CPU-pass sites; emulator fixtures for the capture job.
    Sites: done (static, above). Emulated: flag converter, stage setting sid 961, capture-kind mapper, selector +
-   combiner 11/12 with the neutral-blend stubs, blend setup. Left: the mapper `0x6006888f` ranges (CPU pass, step 4).
+   combiner 11/12 with the neutral-blend stubs, blend setup, bus-address mapper. **Step 2 done** (the per-job gate,
+   the hooks and the pass itself are step 3–4 work, each emulated before a camera build).
 3. Bloom route (useful alone, and it provides the finished YCbCr buffer), one camera test.
 4. Halation pass with the global stage and gate above, then the camera control; emulator proof as in §"How", then camera.

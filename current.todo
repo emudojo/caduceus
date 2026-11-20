@@ -174,7 +174,9 @@ wheel's vividness also stays 0, that is a separate symptom.
   0..3 round-trip and survival of every boot reset emulated (tools/omdem1mk2_emu_spare_setting.py); power-off survival
   needs a camera test. Emulated too: capture-kind mapper 0x6042257f (emu_capture_kind), combiner 11/12 selection and
   the neutral-blend table-word stubs (emu_combiner), blend setup 0x60398ee1 (emu_blend_setup; request = job+11364, so
-  the combiner stub can find its job). Still to do: re-derive the mapper 0x6006888f ranges (needed by the CPU pass).
+  the combiner stub can find its job), mapper 0x6006888f address map (emu_mapper). Step 2 done.
+* Step 3 (next): bloom route on its own: flag hook at 0x604228fc adds 0x80 for the gated shots, per-job mark, combiner
+  stubs; emulate the hook + gate for every picture mode / capture kind before one camera test.
 * Step 3: bloom route (one camera test). Step 4: halation pass + gate + Halo row in color_creator_wheel, emulated first.
 * Code goes in the 100 KB region; the 162 KB gap 0x60bc8800..0x60bf1000 can be probed the same way if needed.
 
