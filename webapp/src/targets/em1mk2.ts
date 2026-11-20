@@ -7,14 +7,16 @@
 // engine behind Color Creator) and the tone block's highlights / midtones / shadows. Not yet: WB shift, effects,
 // vignette, grain, blacks/whites, and true B&W for mono looks (they render as low-vividness Color Creator).
 // toEm1() translates a look to what the camera renders, for the preview only; the look itself is never changed.
-import { encodeLooksBin } from '../format';
+import { encodeLooksBin, FW_LATEST } from '../format';
 import type { Pack, Look } from '../pack';
 import type { Target } from './types';
 
 export const EM1_REPO_DOC = 'docs/PORT_EM1MK2.md';
+export const EM1_CARD_RELEASE = 'v0.4c15';
 
 export function encodeEm1LooksBin(pack: Pack): Uint8Array {
-  return encodeLooksBin(pack);
+  // The E-P7 compatibility selector must not discard fields read by the E-M1 II.
+  return encodeLooksBin(pack, FW_LATEST);
 }
 
 /** The parts of a look the E-M1 II firmware ignores today (for help text). */
@@ -44,7 +46,7 @@ export const em1mk2: Target = {
   id: 'em1mk2-caduceus',
   label: 'Olympus OM-D E-M1 Mark II (Caduceus)',
   status: 'ready',
-  note: 'EM1MOD/LOOKS.BIN (same file as the E-P7); needs E-M1 II firmware v0.3 or later.',
+  note: `EM1MOD/LOOKS.BIN (shared LOOKS.BIN v3). Card loading was first confirmed on ${EM1_CARD_RELEASE}.`,
   supports(_look) {
     return true;
   },

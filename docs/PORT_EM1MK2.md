@@ -43,23 +43,19 @@ All patches reside in non-volatile runtime-loaded section caves copied during `c
   `0x6023d0db`, believed to be a half-press classifier; it is the command-256 branch of an unrelated message loop and
   never runs on a half-press (camera, v0.4c14: `C0.0`). **Camera v0.4c15: `C1.1` after a half-press — loads [C].**
 - **Cave**: `0x60580200` (Section 2).
-- **Behavior**: On first half-press after boot (or upon entering Color Creator), mounts SD slot 1 (`C:\EM1MOD\LOOKS.BIN`) or slot 2 (`D:\EM1MOD\LOOKS.BIN`), checks `EM1B` magic and IEEE 802.3 CRC-32, and keeps the 2,080-byte buffer in heap.
-- **Card loading fixed in v0.4c14** (owner, 2026-11-13: banner always `C0` with `LOOKS.BIN` on the card, so no camera had
-  ever loaded a card file). The gate waited for one of four card-state words (`0x61f9deec` / `def0` nonzero, `dec4` /
-  `dedc` = `0xf000`; per-device words set at `0x607c0c69`, read at `0x607c0c91`) whose meaning was never confirmed on this
-  body (v0.4c14's `C0.0` later showed the hook itself never ran, so the gate was never even reached). v0.4c14 drops the guess: every half-press until the file is loaded tries `fopen` on C: then D:;
-  no file → retry (state 0), up to 8 attempts, then `CF`; a file that opens but fails its checks → `CF` at once. The banner
-  shows `C<state>.<attempts>`: `C0.0` = the half-press hook never ran (and it didn't, on v0.4c14: wrong hook site, fixed in v0.4c15). Also fixed: `clr a3` after `fclose` assembled to an
-  AM33-2 extended op (`f9 68 bb`) the stock code never uses (the emulator rejects it; the path had never run on the camera)
-  → `mov 0,a3`; the opcode audit now refuses `clr aN`. **Emulated** (`tools/omdem1mk2_emu_sdload.py`, real half-press entry
-  `0x6023d0db` → `0x6023d104`, file/heap calls replaced by emulator-only stand-ins `tools/emu_fixtures/em1_fs_stubs.s`):
-  card ready on press 2 → loaded (16 looks); no file → 7 retries then CF; bad CRC → CF at once; the v0.4c13 gate never
-  calls `fopen` (= the camera's C0). **Not emulated:** the real card driver.
-- **State**: in the shared heap block P (`patches/omdem1mk2/p_layout.inc`): `P_SD_STATE` (0 = not tried, 0xFFFF = failed, 1 = loaded) and `P_BUF`. v0.1/v0.2b1 used `0x621e2f76`/`0x621e2f78`, which are inside a stock callback ring (see §4).
+- **Behavior**: on each half-press the loader tries SD slot 1 (`C:\EM1MOD\LOOKS.BIN`), then slot 2
+  (`D:\EM1MOD\LOOKS.BIN` if slot 1 did not open). It validates the shared `EP7B` v3 header, size (64-byte
+  header plus 1–32 64-byte records), and CRC-32. The first valid pack stays in memory for the session.
+- **Status**: `C1.n` means the file loaded in `n` attempts. Missing files are retried for up to eight half-presses
+  (`C0.n` while trying, then `CF.8`). An opened file that fails validation gives `CF.n` immediately.
+- **State**: the shared heap block P holds the buffer, count, attempts, and state (pending, loaded, or failed).
+- **Verification**: the v0.4c15 emulator harness enters the HLS hook `0x602f7bf7` with each event. The
+  camera confirmed loading with `C1.1`. Distinct card look names and rendering in live view and saved JPEG
+  still need a camera check. See [WORKLOG](../WORKLOG.md) for the earlier hook and card-state investigation.
 
 ### 4. In-Camera Look Selection via Live View Color Creator (`color_creator_wheel`)
 
-**Status:** v0.3b5 on camera: colour (12-sector S, H/L), tone (HL/MID/SH), Chroma and Strength all confirmed. Details and addresses: `em1mk2/docs/ARCHITECTURE_AND_MEMORY_MAP.md` §6–7.
+**Status:** v0.3b5 on camera: colour (12-sector S, H/L), tone (HL/MID/SH), Chroma and Strength all confirmed. Details and addresses: `docs/OMD-EM1-II/ARCHITECTURE_AND_MEMORY_MAP.md` §6–7.
 
 | Build | Camera result |
 |---|---|
@@ -84,14 +80,15 @@ All patches reside in non-volatile runtime-loaded section caves copied during `c
 
 Also fixed in v0.2b2: the card loader's CRC check could overwrite a saved register of its caller (missing call slot), and its `free` was for the wrong heap pool (`0x600232d9` instead of `0x6002323d`). Look names are now limited to printable characters.
 
-**"Saturation always 0"** has two separate parts. The Chroma page (Page 1) is shown but **not applied yet** (12-sector saturation needs new firmware code, §"Why looks live in Color Creator"). If the stock wheel's own vividness also always reads 0, that is a separate symptom to report after v0.2b2.
+**"Saturation always 0"** was reported on v0.2b1. The 12-sector colour route arrived in v0.3b1, and the Chroma
+adjustment was confirmed in v0.3b4 after adding a live-view refresh.
 
 #### v0.3: the E-P7 colour engine behind Color Creator
 The E-M1 II's colour stage is the E-P7's (and PEN-F's), byte for byte: selector `0x603ec82c`, per-sector builder `0x603ec642`. On the E-P7, Caduceus feeds looks through it. Stock runs it only for COLOR picture modes (job key 11), which the E-M1 II has no way to select. v0.3 makes it run for **Color Creator** while a Caduceus look is picked, the way the E-P7 got looks into movie mode (`docs/MOVIE_COLOUR.md`):
 - the look's **12-sector saturation** goes into the request the builder reads, and the COLOR branch runs;
 - the look's **per-sector hue and light** are written into the builder's output exactly like the E-P7's `lv` hook;
-- **tone** (H/M/S) goes through settings 889/890/891 as before.
-Color Creator stays the screen you pick looks on. Its own hue/vividness wheel is not used for colour looks. **Mono looks** still only lower vividness (no B&W path yet). Addresses: `em1mk2/docs/ARCHITECTURE_AND_MEMORY_MAP.md` §7.7.
+- **tone** (H/M/S) uses the request-side settings 384/692/383, confirmed on v0.3b5.
+Color Creator stays the screen you pick looks on. Its own hue/vividness wheel is not used for colour looks. **Mono looks** still only lower vividness (no B&W path yet). Addresses: `docs/OMD-EM1-II/ARCHITECTURE_AND_MEMORY_MAP.md` §7.7.
 
 **Card file: `EM1MOD/LOOKS.BIN` is now the E-P7 file** (`EP7B` v3, 64 + 64 bytes per look, up to 32 looks). An E-P7 `LOOKS.BIN` or a Control Panel export (either camera target) works when copied to `EM1MOD/`. The old 2,080-byte `EM1B` file is no longer read. Without a card, 16 built-in looks are used (Provia … Acros).
 
@@ -100,11 +97,14 @@ The E-P7 and PEN-F have COLOR/MONO picture modes, a front Profile Control dial a
 - **Works through stock settings:** hue, vividness and Highlights/Midtones/Shadows.
 - **Needs new firmware code:** 12-sector saturation (planned: read-site override at the builder's `0xF6EA` reads), per-sector hue/light, and monochrome. Color Creator has no B&W, and its lowest vividness is −4.
 
-#### What the editor does (v0.2b1 and later; v0.3 changes noted above)
-- **Page 0 (Film):** the arrows step the look (16 built-in or `LOOKS.BIN`) and write vividness 618, hue 617 and tone 889/890/891 through facade `SetValue(sid, 0, value)`, the same call the stock Color Creator commit uses. The dials run the stock wheel. The banner shows the look name, plus ` E58` (camera busy) or ` E16` (value rejected) if a 617/618 write failed.
-- **Page 1 (Chroma):** keeps and shows a −5..+5 offset. **Not applied to the image yet.** Rear dial and Up/Down: stock vividness.
-- **Page 2 (Luminance):** Front dial and Left/Right = Highlights (889); rear dial and Up/Down = Shadows (891). The banner reads the settings back.
-- **Page 3 (Midtones):** Front dial and Left/Right = Midtones (890), read back in the banner. Rear dial and Up/Down: stock vividness.
+#### What the editor does in v0.4c15
+- **Page 0 (Film):** the arrows pick a look from the loaded card file or the 16 built-ins. The dials run the
+  stock wheel. The banner shows the look name and reports `E58` (camera busy) or `E16` (value rejected)
+  when a Color Creator value write fails.
+- **Page 1 (Chroma):** adds a −5..+5 offset to all 12 saturation sectors for colour looks.
+- **Page 2 (Luminance):** the front dial and Left/Right change Highlights (384). The rear dial and Up/Down
+  change Shadows (383). Midtones (692) come from the selected look.
+- **Page 3 (Strength):** the front dial and Left/Right scale sector saturation, hue and light from x1 to x3.
 - **SCP tile:** the bottom cell shows the look name.
 
 #### Fixed in v0.2b1 (v0.1 mistakes)
@@ -120,18 +120,20 @@ The E-P7 and PEN-F have COLOR/MONO picture modes, a front Profile Control dial a
 - "Settings applied via `em1_set_setting` (`0x602da60b`)": v0.1 called the facade, not `0x602da60b`. Calling `0x602da60b` froze the camera in an earlier test.
 - Validator value-array addresses for 449/450/617/618 pointed at unrelated data. The real lists are in `REA_FIRMWARE_FUNCTIONS_REFERENCE.md` §1.
 
-#### Camera test for v0.3b5
+#### Camera checks for v0.4c15
 1. Copy `DCOLYMP/` and `EM1MOD/` (the new 1,088-byte `LOOKS.BIN`), flash, half-press once, then set the picture mode to Color Creator and open its editor (this records which mode the looks belong to).
-2. Page 0 banner: look name, then ` C` + card state (`1` = `LOOKS.BIN` loaded, `0` = not tried yet: half-press again, `F` = tried and failed: wrong file, or the old 2,080-byte file), then ` K` and four hex digits, then `+`. Note them:
+2. Page 0 banner: look name, card status (`C1.1` for a load on the first half-press), then `K` and four hex
+   digits. A trailing `+` indicates that the colour hook has applied a look.
    - **no `K…`**: the colour-stage hook never ran (or ran before the editor opened); half-press and look again;
    - **`K…` without `+`**: the hook runs but the look was not applied (mode check failed); report the digits;
    - **`K…+`**: the look is applied to live view frames.
 3. With `+`: step Provia → Velvia → Eterna → Bleach Bypass. Velvia should be clearly more saturated, Eterna muted but **in colour**, Bleach Bypass very desaturated. Take a still with each and compare with the live view.
 4. Page 1 (Chroma): left/right should visibly change overall saturation. Step to Tri-X (B&W), then back to Velvia: Velvia must be in colour again.
-4b. Page 2 (Luminance): front dial / left-right should change highlights, rear dial / up-down shadows (449/450). Report if they are swapped.
+4b. Page 2 (Luminance): front dial / left-right changes highlights, rear dial / up-down changes shadows.
 4c. Page 3 (Strength): front dial / left-right steps x1 → x3. Velvia and Classic Chrome should get much stronger; report the strength that looks right.
 5. Switch the picture mode to Natural: the image should go back to stock Natural.
-6. Copy an E-P7 Control Panel export to `EM1MOD/LOOKS.BIN`: names and looks should load.
+6. Export a pack with uniquely named, visibly different looks via the Control Panel. Copy it to
+   `EM1MOD/LOOKS.BIN`, power-cycle, then check the custom names, live view and saved JPEGs.
 
 #### Architecture
 - **Parent Controller Table**: Entry 79 at `0x61259c40` (key `0x13a9` = 5033, Live View Color Creator) in the 92-entry table at `0x61258af8` (searched by `0x60e8b6be`).
@@ -142,25 +144,41 @@ The E-P7 and PEN-F have COLOR/MONO picture modes, a front Profile Control dial a
 
 ## 3. Building & Testing
 
-The unified `caduceus.py` and `tools/build_package.py` tools support the E-M1 Mark II natively:
+Use **v0.4c17** for the OM catalog E-M1 Mark II 3.70 package. This is an emulator-checked test release awaiting camera validation.
 
 ```bash
 # List available releases for the E-M1 Mark II
 python caduceus.py list --camera em1mk2
 
-# Build the v0.1 release (or em1mk2/v0.2b1 for the test build)
-python caduceus.py build --camera em1mk2 --release v0.1 --out out/em1mk2-v0.1
+# Download the matching stock package from OM and build
+python caduceus.py build --camera em1mk2 --release v0.4c17 --out out/em1mk2-v0.4c17
 
 # Verify the built files
-python caduceus.py verify out/em1mk2-v0.1
-
-# Rebuild patches and seal a release under releases/em1mk2/<VERSION>/
-python3 tools/omdem1mk2_make_release_edits.py v0.2b1
+python caduceus.py verify out/em1mk2-v0.4c17
 ```
 
+For a local download, add `--stock PATH` to the build command. v0.4c16 and v0.4c17 pin the stock SHA-256
+`691a8a8e90af75b3848b70856a3a49ef24d72394cdfd2766fa37bdfe6325de70`.
+v0.4c15 still uses its original `f0c25dd8…` image.
+
+v0.4c16 retains the v0.4c15 edits and changes the catalog stock loader's Section 1 end from `0x60257000`
+to `0x60257800`. The added 2 KiB are padding in catalog stock and contain the v0.4c15 aspect code and labels
+after patching. The emulator checks the loader's transfer arguments, aspect switches, menu labels, SCP bitmaps,
+AF, SD look loading, recording limits and the focus-stacking branch. Camera startup, flash transfer, card-driver
+behavior and rendered photos still need camera testing. v0.4c17 also checks card loading before and after
+opening Color Creator. If `C1` first appears while the editor is open, reopen Color Creator to switch to
+the first card look. Until then, the editor and SCP label continue to show the active built-in look.
+
+The release was sealed with `python3 tools/omdem1mk2_catalog_release.py --stock PATH --version v0.4c17` after
+rebuilding the wheel edits with `python3 patches/omdem1mk2/color_creator_wheel/build.py`. The sealer uses the MN103
+emulator and cross-toolchain and creates a fresh release directory. To repeat the focused check on an existing release,
+run `python3 tools/omdem1mk2_emu_color_creator.py releases/em1mk2/v0.4c17/edits.json`.
+
 ### SD Card Deployment
-1. Copy `DCOLYMP/E1259999.BIN` to the camera's SD card under `DCOLYMP/`.
-2. Copy `EM1MOD/LOOKS.BIN` to `EM1MOD/` on the SD card (optional; the 16 standard Caduceus looks are also built into the firmware).
-3. Keep `restore/E1259999.BIN` safely stored on your computer.
-4. Insert the SD card into camera Slot 1, hold the **OK** button, and switch on the camera.
-5. Wait for the activity LED to blink steadily (~2 Hz) indicating successful flashing.
+1. Confirm the camera is an Olympus OM-D E-M1 Mark II on 3.70 and has a fully charged battery.
+2. Copy `DCOLYMP/` and `EM1MOD/` to the root of the SD card. If the card already has your
+   `EM1MOD/LOOKS.BIN`, keep that pack. The one-press builder preserves it automatically.
+   Keep `restore/E1259999.BIN` on your computer.
+3. With the camera off, insert the card into Slot 1. Hold **OK** while switching on the camera.
+4. Wait for the activity LED to blink steadily (~2 Hz) before switching off or removing the card.
+5. Run the [camera validation checklist](../plans/2026-11-19-em1-ii-release/phase-02-camera-validation.md).

@@ -1,15 +1,13 @@
 import json
-import os
+from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 
 FAILS = 0
 
 def audit_code(name, vma, code_bytes, stop_addr=None):
-    tmp = f'/tmp/audit_{name}.bin'
-    with open(tmp, 'wb') as f:
-        f.write(code_bytes)
     cmd = [
         '/home/hertzel/ep7fw-toolchains/mn10300/bin/mn10300-elf-objdump',
         '-D', '-b', 'binary', '-m', 'am33-2',
@@ -17,9 +15,10 @@ def audit_code(name, vma, code_bytes, stop_addr=None):
     ]
     if stop_addr:
         cmd.append(f'--stop-address={hex(stop_addr)}')
-    cmd.append(tmp)
-    res = subprocess.run(cmd, capture_output=True, text=True)
-    os.remove(tmp)
+    with tempfile.TemporaryDirectory(prefix='em1-audit-') as work:
+        tmp = Path(work) / f'{name}.bin'
+        tmp.write_bytes(code_bytes)
+        res = subprocess.run([*cmd, str(tmp)], check=True, stdout=subprocess.PIPE, text=True)
     
     fb_lines = []
     mul_div_lines = []
@@ -94,35 +93,41 @@ def audit_code(name, vma, code_bytes, stop_addr=None):
     global FAILS
     FAILS += len(fb_lines) + len(mul_div_lines) + len(loop_lines) + len(store_lines) + len(call_bad) + len(clr_a)
 
-# Audit color_creator_wheel
-d = json.loads(open('patches/omdem1mk2/color_creator_wheel/edits.json').read())
-cave_edit = [e for e in d['edits'] if e['addr'] == '0x612e6900'][0]
-b = bytes.fromhex(cave_edit['new'])
-data_start_offset = b.find(b"Chroma: ")
-stop_addr = 0x612e6900 + data_start_offset if data_start_offset != -1 else None
-audit_code('color_creator_cave', 0x612e6900, b, stop_addr=stop_addr)
-
-# Audit sd_loader
-d = json.loads(open('patches/omdem1mk2/sd_loader/edits.json').read())
-cave_edit = [e for e in d['edits'] if e['addr'] == '0x60580200'][0]
-b = bytes.fromhex(cave_edit['new'])
-audit_code('sd_loader_cave', 0x60580200, b)
-
-# Audit debug_log
-d = json.loads(open('patches/omdem1mk2/debug_log/edits.json').read())
-cave_edit = [e for e in d['edits'] if e['addr'] == '0x6078e8c0'][0]
-b = bytes.fromhex(cave_edit['new'])
-data_start_offset = b.find(b"C:\\EM1MOD\\")
-stop_addr = 0x6078e8c0 + data_start_offset if data_start_offset != -1 else None
-audit_code('debug_log_cave', 0x6078e8c0, b, stop_addr=stop_addr)
-
-# Audit aspect
-d = json.loads(open('patches/omdem1mk2/aspect/edits.json').read())
-cave_edit = [e for e in d['edits'] if e['addr'] == '0x60257580'][0]
-b = bytes.fromhex(cave_edit['new'])
-code_start = 8 + 96 + 84
-code_len = 122
-audit_code('aspect_switch_cases', 0x6025763c, b[code_start:code_start+code_len])
+# With a release spec, inspect the code that will actually ship. Without one,
+# keep standalone audits of the individual patches, including the debug logger.
+patches = (
+    ('color_creator_wheel', 'color_creator_cave', 0x612e6900, b'Chroma: '),
+    ('sd_loader', 'sd_loader_cave', 0x60580200, None),
+    ('debug_log', 'debug_log_cave', 0x6078e8c0, b'C:\\EM1MOD\\'),
+    ('aspect', 'aspect_switch_cases', None, None),
+)
+release = json.loads(Path(sys.argv[1]).read_text())['edits'] if len(sys.argv) > 1 else None
+for patch, name, addr, marker in patches:
+    # The aspect patch reuses the logger's cave for data. Its shutter hook identifies the logger.
+    if release is not None and patch == 'debug_log':
+        if not any(e.get('kind', '0x100') == '0x100' and e['addr'] == '0x6023d10a' for e in release):
+            continue
+    edits = release if release is not None else json.loads(Path(f'patches/omdem1mk2/{patch}/edits.json').read_text())['edits']
+    if patch == 'aspect':
+        # The setting 270 validator points to the start of the Section 1 cave.
+        ptr = next((e for e in edits if e.get('kind', '0x100') == '0x100' and e['addr'] == '0x604f07d0'), None)
+        if ptr is None:
+            if release is not None:
+                continue
+            sys.exit('Missing aspect validator pointer')
+        addr = int.from_bytes(bytes.fromhex(ptr['new']), 'little')
+    cave = next((e for e in edits if e.get('kind', '0x100') == '0x100' and e['addr'] == hex(addr)), None)
+    if cave is None:
+        sys.exit(f'Missing {patch} code at {addr:#x}')
+    code = bytes.fromhex(cave['new'])
+    if patch == 'aspect':
+        code_start = 8 + 96 + 84
+        if len(code) < code_start + 122:
+            sys.exit(f'Truncated aspect switch code at {addr:#x}')
+        audit_code(name, addr + code_start, code[code_start:code_start + 122])
+    else:
+        offset = code.find(marker) if marker else -1
+        audit_code(name, addr, code, stop_addr=addr + offset if offset != -1 else None)
 
 if FAILS:
     print(f'AUDIT FAILED: {FAILS} finding(s)')

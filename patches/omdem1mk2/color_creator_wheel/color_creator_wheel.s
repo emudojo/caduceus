@@ -107,18 +107,25 @@ cc_init:
     movhu d0,(P_PAGE,a2)
     movbu d0,(P_DIAL,a2)
 
-    /* First entry this session: apply look 0 */
+    /* Apply look 0 on first entry and when switching to a pack loaded since the last entry.
+     * Keep the active editor source stable during an HLS half-press: the guide, arrows and
+     * colour state must all continue to use the same source until this UI task applies the pack. */
+    movhu (P_SD_STATE,a2),d1
+    cmp 1,d1
+    beq 0f
+    clr d1
+0:
+    inc d1                          /* 1 built-in / 2 card */
     movhu (P_INIT,a2),d0
-    cmp 0,d0
-    bne 1f
-    mov 1,d0
-    movhu d0,(P_INIT,a2)
+    cmp d1,d0
+    beq 1f
+    movhu d1,(P_INIT,a2)
     clr d0
     movhu d0,(P_LOOK,a2)
     call apply_active_look,[d2,d3,a2,a3],20
     bra 2f
 1:
-    /* Later entries: pick up the current Highlight/Shadow settings 449/450 */
+    /* Same source: pick up the current Highlight/Shadow settings. */
     mov SID_TONE_HL,d0
     call get_setting_facade,[d2,d3,a2,a3],24
     movbu d0,(P_HL,a2)
@@ -575,10 +582,11 @@ look_name_ptr:
     ret [],4
 
 /* Helper: look_rec (a0 = P, d0 = look index) -> a1 = 64-byte look record. Uses d0, d1.
- * Card (E-P7 LOOKS.BIN, records at buf + 64 + 64 i) when loaded and i < n, else built-in i mod 16. */
+ * Card (E-P7 LOOKS.BIN, records at buf + 64 + 64 i) once selected by the editor and i < n,
+ * else built-in i mod 16. A newly loaded pack is picked up on the next editor entry. */
 look_rec:
-    movhu (P_SD_STATE,a0),d1
-    cmp 1,d1
+    movhu (P_INIT,a0),d1
+    cmp LOOK_SOURCE_CARD,d1
     bne 1f
     mov (P_BUF,a0),a1
     cmp 0,a1
@@ -800,10 +808,10 @@ lv_refresh:
 step_film_profile:
     movhu (P_LOOK,a2),d0
     add d2,d0
-    /* number of looks: card n when loaded, else 16 */
+    /* Number of looks in the editor's current source. */
     mov 16,d1
-    movhu (P_SD_STATE,a2),d3
-    cmp 1,d3
+    movhu (P_INIT,a2),d3
+    cmp LOOK_SOURCE_CARD,d3
     bne 1f
     mov (P_BUF,a2),a0
     cmp 0,a0

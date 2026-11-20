@@ -5,6 +5,21 @@ Container update package: `E1259999.BIN` (93,050,944 bytes) installed via `DCOLY
 
 ---
 
+## v0.4c17 — 2026-11-20 (emulator-checked test release)
+
+- Loading a card pack after opening Color Creator keeps the built-in look active until the editor is reopened.
+  Reopening selects the first card look and updates its name, sector colour values and tone together.
+- The emulator reproduces the v0.4c16 mismatch and checks the corrected editor and SCP labels, early and late
+  loading, look navigation and reentry. The display, card driver and settings facade are fixture boundaries.
+- Retains the v0.4c16 OM 3.70 source, restore and shared card pack. Camera confirmation is pending.
+
+## v0.4c16 — 2026-11-19 (emulator-checked test release)
+
+- Builds from the pinned OM catalog E-M1 Mark II 3.70 package. Its matching restore is byte-identical to that package.
+- Reuses the v0.4c15 patch set. Restores the 2 KiB Section 1 tail required by the 65:24 and 21:9 aspect code and labels.
+- The emulator checks the transfer request length and addresses, aspect UI, SD look loading, AF, recording limits,
+  and focus-stacking branch. The release awaits confirmation on an E-M1 Mark II.
+
 ## v0.4c15 — 2026-11-13 (camera-tested: card looks load, `C1.1` after a half-press)
 
 - v0.4c14 on the camera read `C0.0`: the loader had never tried once. Its trigger sat in a part of the firmware that a

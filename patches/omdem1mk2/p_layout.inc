@@ -25,11 +25,12 @@
 .equ P_MAGIC_OFF,   0               /* u32 'EM1P' */
 .equ P_HCOPY,       4               /* u16 copy of the handle */
 .equ P_SD_STATE,    6               /* u16 0 = not tried, 1 = LOOKS.BIN loaded, 0xFFFF = failed */
-.equ P_BUF,         8               /* u32 LOOKS.BIN buffer (2,080 B) */
+.equ P_BUF,         8               /* u32 LOOKS.BIN v3 buffer (up to 2,112 B) */
 .equ P_RAW,         12              /* u32 raw malloc pointer of P */
-.equ P_LOOK,        16              /* u16 active look index 0..15 */
+.equ P_LOOK,        16              /* u16 active look index (0..15 built-in, 0..31 card) */
 .equ P_PAGE,        18              /* u16 editor page 0..3 */
-.equ P_INIT,        20              /* u16 1 once a look was applied this session */
+.equ P_INIT,        20              /* u16 applied editor source: 0 = none, 1 = built-in, 2 = card */
+.equ LOOK_SOURCE_CARD, 2
 .equ P_HL,          22              /* s8 highlights */
 .equ P_MID,         23              /* s8 midtones */
 .equ P_SH,          24              /* s8 shadows */

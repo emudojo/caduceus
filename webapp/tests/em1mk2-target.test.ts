@@ -1,15 +1,31 @@
 // The E-M1 Mark II export target (src/targets/em1mk2.ts): same LOOKS.BIN as the E-P7, plus the preview translation.
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import libraryJson from '../src/data/library.json';
-import { checkLooksBin, decodeLooksBin, encodeLooksBin } from '../src/format';
+import { FW_LATEST, checkLooksBin, decodeLooksBin, encodeLooksBin, setFirmware } from '../src/format';
 import { blankLook, parsePack, type Pack } from '../src/pack';
-import { em1Dropped, em1mk2, toEm1 } from '../src/targets/em1mk2';
+import { em1Dropped, em1mk2, encodeEm1LooksBin, toEm1 } from '../src/targets/em1mk2';
 import { CAMERAS } from '../src/cameras';
 
 const LIB = parsePack(libraryJson);
 const pack = (looks: Pack['looks']): Pack => ({ ...LIB, looks: looks.slice(0, 32), slots: {} });
 
+afterEach(() => setFirmware(FW_LATEST));
+
 describe('E-M1 II export', () => {
+  it('keeps the saturation of a toned look when an older E-P7 firmware is selected', () => {
+    const look = blankLook('colour', 'Toned');
+    look.tone.highlights = 3;
+    look.sat = [5, -5, 2, -2, 1, -1, 0, 3, -3, 4, -4, 0];
+    const p = pack([look]);
+    setFirmware(23);
+
+    const em1 = decodeLooksBin(encodeEm1LooksBin(p)).looks[0];
+    expect(em1.sat).toEqual(look.sat);
+    expect(em1.tone.highlights).toBe(3);
+    const legacyEp7 = decodeLooksBin(encodeLooksBin(p)).looks[0];
+    expect(legacyEp7.sat).toEqual(new Array<number>(12).fill(0));
+  });
+
   it('writes EM1MOD/LOOKS.BIN byte-identical to the E-P7 file', () => {
     const p = pack(LIB.looks);
     const [f] = em1mk2.export(p) as { name: string; data: Uint8Array }[];

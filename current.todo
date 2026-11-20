@@ -1,7 +1,8 @@
 # Caduceus Port to Olympus OM-D E-M1 Mark II (v3.70): Status & TODO
 
-Updated 2026-11-10 (after the v0.2b1 camera test). Addresses and evidence: em1mk2/docs/ARCHITECTURE_AND_MEMORY_MAP.md §6–7,
-em1mk2/docs/REA_FIRMWARE_FUNCTIONS_REFERENCE.md §1, docs/PORT_EM1MK2.md §4, WORKLOG.md (2026-11-10).
+Updated 2026-11-20 (v0.4c17 sealed, emulator-checked; last camera evidence v0.4c15 C1.1). Addresses and evidence:
+docs/OMD-EM1-II/ARCHITECTURE_AND_MEMORY_MAP.md §6–7, docs/OMD-EM1-II/REA_FIRMWARE_FUNCTIONS_REFERENCE.md §1,
+docs/PORT_EM1MK2.md §4, docs/OMD-EM1-II/HALATION.md, WORKLOG.md (2026-11-13).
 
 ---
 
@@ -10,17 +11,22 @@ em1mk2/docs/REA_FIRMWARE_FUNCTIONS_REFERENCE.md §1, docs/PORT_EM1MK2.md §4, WO
 ### A. Firmware container & build tooling
 * Target: E-M1 Mark II fw 3.70 (build 3700, model 0x1250), MN10300 / AM33-2, main base VMA 0x60021020.
 * 5-component 93 MB container rebuilt by tools/build_package.py; edits verified against stock bytes.
-* Releases: v0.1, v0.2b1, v0.2b2 (camera-tested, looks wrong), v0.3b1 (built, NOT camera-tested).
-  `python3 tools/omdem1mk2_make_release_edits.py <VERSION>` rebuilds patches and seals a release in its own folder.
+* Releases kept in releases/em1mk2/: v0.4c13, v0.4c15 (camera-tested, old stock `f0c25dd8…`), v0.4c16 and v0.4c17
+  (OM catalog stock `691a8a8e…`, emulator-checked, not camera-tested). debug_log is in none of them.
+  `python3 tools/omdem1mk2_make_release_edits.py <VERSION>` rebuilds patches and seals a release (old stock);
+  `python3 tools/omdem1mk2_catalog_release.py --stock <OM file> --version v0.4c16|v0.4c17` seals the catalog builds
+  and runs check_loaded, audit_opcodes and every emu_* harness first.
+* Stock pinning: the camera default stays `f0c25dd8…` (c13/c15); c16+ pin `691a8a8e…` in edits.json `stock_sha256`.
 
 ### B. Working on camera (v0.1)
 * rec_limit (29 min / 2 h → 9 h), focus_stacking (lens whitelist removed).
 
 ### C. SD card look loader (sd_loader)
-* Cave 0x60580200 (Section 2), trigger at TRIG1 half-press classifier 0x6023d0db.
-* Reads EM1MOD/LOOKS.BIN (2,080 B: 32 B header 'EM1B' + 16 × 128 B slots), CRC-32 check.
+* Cave 0x60580200 (Section 2), trigger = HLS event loop hook 0x602f7bf7 on the half-press event 0x02000100
+  (since v0.4c15; the old site 0x6023d0db was never a half-press handler).
+* Reads EM1MOD/LOOKS.BIN in the E-P7 v3 format (shared encoder since v0.3b1; the 'EM1B' 128 B-slot file is retired).
 * Owns the shared state block P (patches/omdem1mk2/p_layout.inc): p_get / p_ensure, handle u16 at 0x621e24ae.
-* Slot = shared Caduceus 64 B lookRecord (webapp/src/format.ts) + E-M1 extras: +64 vividness, +65 hue.
+* Slot = shared Caduceus lookRecord (webapp/src/format.ts), exported by webapp/src/targets/em1mk2.ts.
 
 ### D. Color Creator look editor (color_creator_wheel), v0.2b1
 * Editor record 0x61259c40 (key 0x13a9), cave 0x612e6900 (1,944 B), guide label .data init word 0x60297fb4,
@@ -134,71 +140,55 @@ wheel's vividness also stays 0, that is a separate symptom.
 * DONE v0.4c13-sp1 [C]: S+ after bursts / modes -> 0x612e7000..0x61300000 (100 KB) usable. S+ also after a power cycle and a movie.
 * DONE v0.4c14 [C]: C0.0 -> the hook site 0x6023d0db never runs on a half-press (wrong site since v0.1).
 * DONE v0.4c15 [C]: C1.1 after a half-press: LOOKS.BIN loads (hook 0x602f7bf7). To confirm: card look names / colours.
-* NOW: halation step 2: spare remembered setting for the stage; Soft Focus / CPU-pass sites (code-shape search).
-* NEXT FEATURE: halation (E-P7 version), global over any film / colour profile. Plan and owner decisions:
-  docs/OMD-EM1-II/HALATION.md. Step 1 = code space, step 2 = spare remembered setting + Soft Focus / CPU-pass sites.
-* NEXT (aspect, untested): live-view framing, rec-view, power-cycle with 6/7 saved, RAW+JPEG, Live Control strip,
-  remaining E-P7 AF sites (tracking/AUTO), grid overlay. Then decide whether to bring debug_log back.
-* Trace later: what uses RAM 0xa3b0e400..0xa3bb7140 after OSD bank 69 (why the append drew blank).
-* Then: AF target selector with 65:24/21:9, live-view framing, power-off/on with 6/7 saved.
-* NEXT: real 65:24 / 21:9 icons (OSD component 0x101, E-P7 patches/aspect/osd_icons.py route).
-* (old) flash v0.4c1 (text strip labels) → Menu 1 > Image Aspect and SCP/Live Control should list Panorama + Wide.
-  If the strip cells are blank: v0.4c2 (placeholder icons). Then real XP/21:9 icons + menu label text.
-* (old) v0.3b5r (== camera-tested v0.3b5) to recover; v0.4b5 (v0.3b5 + aspect only).
-* Logger later: E-M1 II HLS tid + task proof, then re-site with the E-P7/OM-3 four-part gate.
-* (old) flash v0.4b3 (no aspect). Shutter must work; with DEBUG.TXT, CADLOG.TXT must appear. Then v0.4b4 (+ aspect):
-  Shooting Menu 1 > Image Aspect and the SCP aspect strip; note blank rows vs no rows.
+* v0.4c16 [E]: OM's catalog 3.70 file (`691a8a8e…`) loads Section 1 only to 0x60257000 (old stock: 0x60257800), which
+  left the aspect cave 0x60257580..0x602577ff unloaded (check_loaded fails c15 on this stock). c16 = c15 + one edit at
+  0x60042b4d (Section 1 end 0x60257000 -> 0x60257800; tail is 0xFF padding; transfer grows by exactly 2 KiB).
+* v0.4c17 [E]: c16 + Color Creator fix: a card pack loaded after the editor opened showed the card name with built-in
+  colour / tone (reproduced in emu_color_creator). Now the active look stays until reopen, which selects card look 0.
 
-## 3. TODO
+## 3. TODO (rewritten 2026-11-20 against the code and WORKLOG; old §3 priorities were from 2026-11-10)
 
-### Priority 1: Camera test v0.3b2 (docs/PORT_EM1MK2.md §4 "Camera test for v0.3b1")
-0. Half-press once after power-on, open Color Creator: readable names?
-1. Page 0 look step: does the reticle move and the image change? Any " Exx" code?
-2. After picking Velvia (H+1 M0 S-4), does the stock Highlight & Shadow screen show it, in that order?
-   This confirms or rejects 889/890/891 and their order.
-3. Page 2/3 banners follow the dials? (They are read back from the settings.)
-4. Multi-detent dial turns now step more than once?
-5. SCP tile: does the rear dial change the live view or the icon while the text stays on the look name?
+### Done (code in patches/omdem1mk2, camera-confirmed unless noted)
+* Old P1/P2 (v0.3b2 test and decisions): done in §2e–2h. Tone = request-side 384 / 692 / 383 (v0.3b5), HL/SH order [C].
+* Old P3 colour route: E-P7 COLOR engine route (cc_sel / cc_hl hooks), shared LOOKS.BIN v3.
+* Old P3b 12-sector saturation: covered by the COLOR route (12-sector sat, per-sector hue / light; see em1mk2.ts header).
+* Aspect 65:24 / 21:9: regular menu, SCP tile + option row, AF selector (v0.4c13), icons via patches/omdem1mk2/aspect_icons.
+* Card loader: LOOKS.BIN loads on half-press (v0.4c15, C1.1, hook 0x602f7bf7).
+* Halation step 1: code space 0x612e7000..0x61300000 (100 KB) proven usable (sp1, S+) [C].
+* debug_log kept out of releases (0 of its edits in releases/em1mk2/v0.4c15/edits.json).
 
-### Priority 2: Decide from the test
-* If " E58": find what sets the busy bits (0x607abb14) while the editor is open, and defer the write
-  (e.g. do it from the child commit path instead of the key handler).
-* If " E16": dump the value we pass vs the child's list (+104) for that sid.
-* If no code but still no image change: the write succeeds and something reverts it. Check the editor's
-  cancel/restore path and whether 617/618 are snapshotted on entry.
-* If tone lands in the wrong slot: try 449/450 and the mirrors 383 (SH) / 384 (HL) / 692 (MID).
+### Retired / no longer applies
+* +64 vividness / +65 hue panel mapping (the 'EM1B' file format is retired; em1mk2.ts exports the shared v3 file).
+* (old) v0.4b3 / v0.4b4 / v0.4b5 / v0.3b5r and v0.4c1 / c2 flash plans in §2i (superseded by v0.4c13–c15).
 
-### Priority 3: next E-P7 features on the colour route (after v0.3b1 works)
-* Tone Blacks/Whites: locate the E-P7 `tone` site (0x603b14ff) here; mono looks (B&W path);
-  stills vs live view check; persistence of the picked look across power-off.
+### Priority 1: confirm v0.4c17 on camera (plan: plans/2026-11-19-em1-ii-release/phase-02-camera-validation.md)
+* In order: boot, normal capture, SCP aspect 65:24 / 21:9 (needs the c16 Section 1 fix), AF, card looks.
+* Card looks: use a pack clearly different from the built-ins; names and colours in Color Creator, live view and JPEG.
+* Load order: open Color Creator before the first half-press, then reopen: card look 0 with its own colours (c17 fix).
+* Persistence: picked look kept over power-off.
 
-### (done in v0.3b1) port the E-P7 colour route instead of Color Creator values
-* Found: this body has the E-P7/PEN-F COLOR engine (selector 0x603ec82c, builder 0x603ec642, hook site
-  0x603ec8b3 byte-identical to E-P7 0x603b02d9), gated on job key 11.
-* Copy the E-P7 movie layer design (docs/MOVIE_COLOUR.md "As built"): job key -> 11 when a look is active,
-  effective-S reads -> look S, 0xF6B1 message byte non-zero; then H/L at 0x603ec8b3 like the E-P7 `lv` hook.
-* Read LOOKS.BIN in the E-P7 container so both cameras share one file.
+### Priority 2: halation (E-P7 version, global stage; plan and owner decisions: docs/OMD-EM1-II/HALATION.md)
+* Step 2 (NOW): find a spare remembered setting for the stage; find the Soft Focus flag hook / entry
+  (≈0x604228fc, ≈0x6039517c / 0x60398ee1), combiner 11/12, CPU-pass route and watchdog sites by code-shape search;
+  emulator fixtures for the capture job.
+* Step 3: bloom route (one camera test). Step 4: halation pass + gate + Halo row in color_creator_wheel, emulated first.
+* Code goes in the 100 KB region; the 162 KB gap 0x60bc8800..0x60bf1000 can be probed the same way if needed.
 
-### Priority 3b (old plan): 12-sector saturation
-* Read-site override at the builder's 0xF6EA reads (0x602d24fb..0x602d25db, getter 0x6005e6cf):
-  when picture mode = Color Creator and a look is active, return the look's sector values.
-  Same technique as the E-P7 NR override (docs/FIRMWARE_GUIDE.md).
-* First check: does the pipeline use request +24208 outside picture mode 11? An emulator run of the
-  builder or a camera A/B with an extreme value.
-* Also find the capture-side copy (0x60cc1f.. fills the same offsets for the mirrors; check for 0xF6EA there).
+### Priority 3: aspect, still untested on camera
+* Live-view framing, rec-view, power-cycle with 6/7 saved, RAW+JPEG, Live Control strip, remaining E-P7 AF sites
+  (tracking / AUTO), grid overlay.
+* Trace later: what uses RAM 0xa3b0e400..0xa3bb7140 after OSD bank 69 (why the appended icons drew blank).
 
-### Priority 4: SCP tile
-* Show "look name" only when 617/618 still equal the look's values; otherwise show the stock text.
-* Confirm by camera first (Priority 1 item 5).
+### Priority 4: more look features on the colour route
+* Tone Blacks / Whites: locate the E-P7 `tone` site (0x603b14ff) on this body.
+* True B&W for mono looks (now Color Creator vividness -4): Monotone picture mode switch or a request-level override.
+* Grain, sharpening off, NR per look: find the E-M1 II equivalents of the E-P7 CPU-side save-path hooks.
+* SCP tile: show the look name only while 617/618 still equal the look's values, else stock text (no code yet).
 
-### Priority 5: Consolidated Caduceus for E-P7 + E-M1 II
-* One Control Panel: the em1mk2 target already exports the shared lookRecord. Add +64/+65
-  (vividness/hue) mapping from the look's colour data so panel-made cards get a Color Creator base too.
-* Feature map E-P7 → E-M1 II (each needs its own hook on this body; nothing is copied by address):
-  - Film looks: hue/vivid/tone now; per-sector sat next (P3); per-sector hue/light needs a request field
-    (look for the E-P7 COLOR table equivalent in TruePic VIII).
-  - Mono looks: Color Creator cannot do B&W. Options: switch picture mode 111 to Monotone for mono looks
-    (leaves Color Creator) or a request-level override.
-  - Grain, sharpening off, NR per look: E-P7 hooks are CPU-side save paths; find E-M1 II equivalents.
-  - Aspect ratios, button functions: list-table edits; repeat the stride search on this body.
-* Keep each body's firmware in its own patch folder; share only the look format and the panel.
+### Priority 5: logger
+* Decide whether to bring debug_log back: E-M1 II HLS tid + task proof, then re-site with the E-P7/OM-3 four-part gate
+  (the HLS loop 0x602f7b11 found in v0.4c15 is the candidate).
+
+### Priority 6: upstream (AGENTS.md)
+* Move the em1mk2 firmware (patches/omdem1mk2, tools/omdem1mk2_*, releases/em1mk2) to its own repo.
+* Offer webapp/src/targets/em1mk2.ts + the cameras.ts profile to @cakelesscoder (issue/PR); credit in NOTICE.

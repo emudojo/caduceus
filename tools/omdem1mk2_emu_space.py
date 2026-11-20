@@ -20,15 +20,16 @@ sys.path.insert(0, str(ROOT / 'external/oly_fw_analysis/tools'))
 import omdem1mk2_emu_validator as V  # noqa: E402
 from penf_emulator import Region, execute  # noqa: E402
 
-SECS = [(0x60021020, 0x600de000), (0x600de000, 0x60257800), (0x602ae000, 0x60580800), (0x60591800, 0x605d3000),
-        (0x605d5000, 0x6078f000), (0x60796000, 0x60bc8800), (0x60bf1000, 0x612e7000), (0x61300000, 0x613ed000),
-        (0x613f6800, 0x6146d000)]
 SP = json.loads((ROOT / 'patches/omdem1mk2/space_probe/exports.json').read_text())
 STK, TXT = 0x9f000000, 0x9f100000
 
 
 def regions(img, region=None):
-    rg = [Region(f's{i}', lo, img[lo - V.B:hi - V.B], 'rx') for i, (lo, hi) in enumerate(SECS)]
+    rg = []
+    for i, (lo, hi) in enumerate(V.loaded_sections(img)):
+        if region is not None and lo < SP['REGION'] < hi:
+            hi = SP['REGION']
+        rg.append(Region(f's{i}', lo, img[lo - V.B:hi - V.B], 'rx'))
     if region is not None:
         rg.append(Region('probe', SP['REGION'], region, 'rw'))
     return rg + [Region('stk', STK, bytes(0x2000), 'rw', True), Region('txt', TXT, bytes(0x40), 'rw', True)]

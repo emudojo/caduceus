@@ -26,8 +26,6 @@ sys.path.insert(0, str(ROOT / 'external/oly_fw_analysis/tools'))
 import omdem1mk2_emu_validator as V  # noqa: E402
 from penf_emulator import Region, execute  # noqa: E402
 
-SECS = [(0x60021020, 0x600de000), (0x600de000, 0x60257800), (0x602ae000, 0x60580800), (0x60591800, 0x605d3000),
-        (0x605d5000, 0x6078f000), (0x60796000, 0x60bc8800), (0x60bf1000, 0x612e7000)]
 RAM = (0x621c0000, 0x62800000)
 KERN = 0x1c400000
 STUBS = {0x6005e6cf: bytes.fromhex('00dfc00c')}            # semaphore signal: clr d0; ret [d2,d3],12
@@ -59,7 +57,7 @@ class Emu:
         img = self.img
         code = b'\xdd' + struct.pack('<i', target - V.CALLER) + bytes([mask, frame]) + b'\xcb'
         regions = [Region('caller', V.CALLER, code, 'rx'), Region('stack', V.STACK, bytes(0x1000), 'rw')]
-        regions += [Region(f's{i}', lo, img[lo - V.B:hi - V.B], 'rx') for i, (lo, hi) in enumerate(SECS)]
+        regions.extend(V.main_regions(img))
         regions += [Region('ram', RAM[0], self.ram, 'rw', capture=True),
                     Region('ram_unc', RAM[0] + 0x40000000, self.ram, 'rw', alias_of='ram'),
                     Region('rom_memcpy', ROM_MEMCPY[0], bytes.fromhex(ROM_MEMCPY[1]), 'rx'),

@@ -20,8 +20,6 @@ sys.path.insert(0, str(ROOT / 'external/oly_fw_analysis/tools'))
 import omdem1mk2_emu_validator as V  # noqa: E402
 from penf_emulator import Region, execute  # noqa: E402
 
-SECS = [(0x60021020, 0x600de000), (0x600de000, 0x60257800), (0x602ae000, 0x60580800), (0x60591800, 0x605d3000),
-        (0x605d5000, 0x6078f000), (0x60796000, 0x60bc8800), (0x60bf1000, 0x612e7000)]
 STK, OBJ = 0x9f000000, 0x9f100000
 SENT = 0x5a5a5a5a
 VALUES = [1, 2, 3, 4, 9, 10, 6, 7]
@@ -38,7 +36,7 @@ def run(img, pc, stop, regs, stack=None, obj=None):
     ob = bytearray(struct.pack('<I', SENT) * 0x100)
     for off, (fmt, val) in (obj or {}).items():
         struct.pack_into(fmt, ob, off, val)
-    rg = [Region(f's{i}', lo, img[lo - V.B:hi - V.B], 'rx') for i, (lo, hi) in enumerate(SECS)]
+    rg = list(V.main_regions(img))
     rg += [Region('stk', STK, bytes(stk), 'rw', True), Region('obj', OBJ, bytes(ob), 'rw', True)]
     r = execute(rg, dict({'pc': pc, 'sp': STK + 0x800}, **regs), 0xfffffff0, limit=20000, breakpoints=stop)
     if r['status'] != 'breakpoint' or r['fault']:

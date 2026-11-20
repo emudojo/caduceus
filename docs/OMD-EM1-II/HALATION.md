@@ -13,7 +13,7 @@ brightness, gradual daylight fade; credit in NOTICE).
 | Scope | Halation applies **over any film / colour profile** once enabled, not per look |
 | Where the setting lives | **A camera control, remembered over power-off** in the camera's own settings memory (one spare stock setting, found and emulator-proven first) |
 | Picture modes | **All colour modes**: our looks (Color Creator) and the stock colour modes (Natural, Vivid, Muted, Portrait, i-Enhance, …). Not Monotone, not Art Filters |
-| Precedence | **The global setting sets the strength; the glow colour comes from the look** (red / amber / warm / cool, `tint` +45), red when the look has none |
+| Precedence | **The global setting sets the strength; the glow colour comes from the look** (red / amber / warm / cool, `tint` at LOOKS.BIN record +47), red when the look has none |
 
 ## How "always applied" is guaranteed
 
@@ -35,9 +35,9 @@ brightness, gradual daylight fade; credit in NOTICE).
 |---|---|
 | Soft Focus route (bloom: flag hook, blend setup, combiner 11, callback) | callback `0x60391959`, blend setup `0x60398f5f`, effect selector `0x603f1653` exact; flag hook ≈ `0x604228fc`, Soft Focus entry ≈ `0x6039517c` / `0x60398ee1` (prefix match); combiner 11/12 calls not found by bytes |
 | CPU pass route (grain_cpu r2: work-list hook, window / mapper, lock / unlock) | not found by bytes; needs code-shape search |
-| Watchdog 10 s → 30 s (E-P7 v0.31b) | sites not found by bytes |
+| Watchdog 10 s → 30 s (E-P7 v0.31b) | E-M1 II stock write path confirmed up to the hardware handshake. See below. |
 | Spare remembered setting for the stage | to find |
-| Code space ~1.8 KB + tables; one malloc ≤ 16 KB per shot | **blocker**: the known free space is used up by the aspect work |
+| Code space ~1.8 KB + tables; one malloc ≤ 16 KB per shot | 100 KB of loaded gap confirmed on camera with sp1. The actual halation allocation and code placement still need verification. |
 | Camera control | a Halo row/page in the look editor (`color_creator_wheel`) |
 
 ## Step 1: code-space probe sp1 (2026-11-13; **camera: S+**)
@@ -58,13 +58,21 @@ brightness, gradual daylight fade; credit in NOTICE).
   editor's own `call` site through the check and back. **Not emulated:** the loader's flash copy, and whether anything
   uses that RAM later -- that is the camera test.
 - **Camera (owner, v0.4c13-sp1):** banner `Provia C0 S+ K0009+` after several bursts and picture-mode changes: the region is
-  loaded and untouched by normal use → **0x612e7000..0x61300000 (100 KB) usable** for code and tables [C]. Still to see:
-  `S+` after a power cycle and a movie. (`C0` = the card loader has not run yet; to compare with v0.4c13's reading.)
+  loaded and untouched by normal use → **0x612e7000..0x61300000 (100 KB) usable** for code and tables [C].
+  The owner also reported `S+` after a power cycle and a movie.
 - The 162 KB gap after section 4 can be probed the same way when needed.
+
+## Stock watchdog write path (2026-11-20)
+
+The OM 3.70 stock path at `0x6005aecc` passes 10 to `0x600226fd`. The emulator ran that stock call with
+mapped watchdog registers. It changed `0x98e0008c` from `0x13f` to `0x10a`, preserving the upper bits,
+then wrote `0x20041001` to `0x98e000a4`. The run stopped before the hardware acknowledgement loop at
+`0x60022728`. The startup path, timer units on camera, and time consumed by an E-M1 II image pass still
+need confirmation before deciding whether to change the timeout.
 
 ## Order
 
-1. Code space: prove more loaded space (camera probe of a section's loaded-end word, as the OM-3 did) or a card-loaded code block.
+1. Code space: confirmed with the sp1 loaded-end probe above.
 2. Find the spare remembered setting and the Soft Focus / CPU-pass sites; emulator fixtures for the capture job.
 3. Bloom route (useful alone, and it provides the finished YCbCr buffer), one camera test.
 4. Halation pass with the global stage and gate above, then the camera control; emulator proof as in §"How", then camera.

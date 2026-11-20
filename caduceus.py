@@ -20,7 +20,7 @@ permutation, additive 32-bit checksum) as documented publicly by Altsoph and
 mx3 in CHDK forum thread 2471.
 """
 import re, argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import os
@@ -39,6 +39,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 RELEASES = ROOT / 'releases'
 CATALOG = 'https://fw01.om-digitalsolutions.net/ww_inform/fcache.do'
+EM1MK2_CATALOG_STOCK_SHA = '691a8a8e90af75b3848b70856a3a49ef24d72394cdfd2766fa37bdfe6325de70'
 
 # ---------------------------------------------------------------- camera models
 @dataclass(frozen=True)
@@ -316,21 +317,37 @@ def read_sums(path):
     return sums
 
 
+def release_package_hashes(sums, cam: Camera):
+    """Resolve package checksums named either generically or by the camera's updater."""
+    patched = sums.get('patched.pkg.bin', sums.get(cam.card_name))
+    restore = sums.get('restore-stock.pkg.bin')
+    if not patched or not restore:
+        raise Refuse(f'release SHA256SUMS is missing a package checksum for {cam.name}.')
+    return {cam.update_path: patched, cam.restore_path: restore}
+
+
+def release_stock_hash(spec, cam: Camera):
+    expected = spec.get('stock_sha256', cam.stock_sha)
+    if expected != cam.stock_sha and not (cam.id == 'em1mk2' and expected == EM1MK2_CATALOG_STOCK_SHA):
+        raise Refuse(f'Unsupported stock firmware checksum for {cam.name}: {expected!r}')
+    return expected
+
+
 def _release_entry(d: Path) -> Optional[Tuple[str, Path, str]]:
     """Return (release_name, dir_path, camera_id) if valid release dir."""
     edits_file = d / 'edits.json'
     sums_file = d / 'SHA256SUMS'
     if not (edits_file.is_file() and sums_file.is_file()):
         return None
-    sums = read_sums(sums_file)
-    if 'patched.pkg.bin' not in sums:
-        return None
     try:
         spec = json.loads(edits_file.read_text())
-        cam_id = spec.get('camera') or ('em1mk2' if 'em1mk2' in d.name else 'ep7')
-    except Exception:
-        cam_id = 'ep7'
-    return d.name, d, cam_id
+        if not isinstance(spec, dict):
+            return None
+        cam = get_camera(spec.get('camera') or ('em1mk2' if 'em1mk2' in d.name else 'ep7'))
+        release_package_hashes(read_sums(sums_file), cam)
+    except (Refuse, ValueError):
+        return None
+    return d.name, d, cam.id
 
 
 def releases(camera_id: Optional[str] = None):
@@ -417,6 +434,13 @@ def load_release(name: str, camera_id: Optional[str] = None):
     if 'edits.json' in sums and sha(spec_bytes) != sums['edits.json']:
         raise Refuse(f'{d}/edits.json does not match {d}/SHA256SUMS '
                      '(repository out of sync; update your copy).')
+    spec = json.loads(spec_bytes)
+    expected_stock = release_stock_hash(spec, cam)
+    if 'stock_sha256' in spec and (
+        'edits.json' not in sums or sums.get('restore-stock.pkg.bin') != expected_stock
+    ):
+        raise Refuse(f'{d}: the stock checksum must be sealed with the edits and the full stock restore.')
+    cam = replace(cam, stock_sha=expected_stock)
     card = {}
     for n, h in sums.items():
         if n.startswith('card/'):
@@ -427,11 +451,11 @@ def load_release(name: str, camera_id: Optional[str] = None):
             if sha(b) != h:
                 raise Refuse(f'{d}/{n} does not match SHA256SUMS')
             card[n[len('card/'):]] = b
-    return json.loads(spec_bytes), sums, card, cam
+    return spec, sums, card, cam
 
 
 def find_stock(camera: Optional[Camera] = None):
-    """An already downloaded OM file locally in workspace, cache, or Downloads."""
+    """Find a local OM file matching the selected release's stock checksum."""
     cam = camera or DEFAULT_CAM
     names = [cam.stock_name] + list(cam.alt_stock_names)
     search_dirs = [
@@ -440,6 +464,7 @@ def find_stock(camera: Optional[Camera] = None):
         ROOT / 'stock_firmware' / cam.id,
         ROOT / 'stock_firmware' / f"omd{cam.id}",
         ROOT / cam.id / 'firmware',
+        ROOT / 'cache' / cam.stock_sha,
         ROOT / 'cache',
         Path.home() / 'Downloads',
     ]
@@ -447,7 +472,7 @@ def find_stock(camera: Optional[Camera] = None):
         for n in names:
             p = d / n
             try:
-                if p.is_file() and p.stat().st_size == cam.stock_size:
+                if p.is_file() and p.stat().st_size == cam.stock_size and sha(p.read_bytes()) == cam.stock_sha:
                     return p
             except OSError:
                 pass
@@ -459,6 +484,7 @@ def cmd_build(a):
     if out.exists() and (not out.is_dir() or any(out.iterdir())):
         raise Refuse(f'{out} already exists and is not empty; choose another --out or remove it.')
     spec, sums, card, cam = load_release(a.release, getattr(a, 'camera', None))
+    package_hashes = release_package_hashes(sums, cam)
     if a.stock:
         p = Path(a.stock)
         if not p.is_file():
@@ -474,18 +500,14 @@ def cmd_build(a):
 
     if sha(stock) != cam.stock_sha:
         raise Refuse(f'stock firmware SHA-256 is {sha(stock)}\nexpected {cam.stock_sha}\n'
-                     f'This is not the official {cam.name} {cam.version} file {cam.stock_name} ({cam.stock_size} bytes). Nothing written.')
+                     f'This package differs from the stock {cam.name} {cam.version} image pinned for this release. Nothing written.')
     print(f'Stock firmware for {cam.name} OK. Applying {len(spec["edits"])} edits ...')
     patched, restore = apply_edits(spec, stock, camera=cam)
-    outputs = {
-        'patched.pkg.bin': cam.update_path,
-        'restore-stock.pkg.bin': cam.restore_path,
-    }
-    files = {outputs['patched.pkg.bin']: patched, outputs['restore-stock.pkg.bin']: restore}
-    files.update(card)
-    for rel_name, data in (('patched.pkg.bin', patched), ('restore-stock.pkg.bin', restore)):
-        if sha(data) != sums[rel_name]:
-            raise Refuse(f'{rel_name}: built hash {sha(data)} != release {sums[rel_name]}. Nothing written.')
+    files = {cam.update_path: patched, cam.restore_path: restore, **card}
+    for rel_name, expected in package_hashes.items():
+        actual = sha(files[rel_name])
+        if actual != expected:
+            raise Refuse(f'{rel_name}: built hash {actual} != release {expected}. Nothing written.')
     # write into a temp dir next to the target, then move into place
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix='.caduceus-', dir=out.parent))
@@ -517,6 +539,8 @@ def cmd_verify(a):
     if not man.is_file():
         raise Refuse(f'{man} not found; is {d} a caduceus build directory?')
     sums, bad = read_sums(man), 0
+    if not sums:
+        raise Refuse(f'{man} contains no file checksums.')
     for rel, h in sorted(sums.items()):
         f = d / rel
         ok = f.is_file() and sha(f.read_bytes()) == h
@@ -527,16 +551,17 @@ def cmd_verify(a):
     if rel_name:
         try:
             rel_dir, cam = find_release_dir(rel_name, cam_name)
+        except Refuse as e:
+            print(f'  note: {e}; checked the local manifest only')
+        else:
             rs = read_sums(rel_dir / 'SHA256SUMS')
-            want = {cam.update_path: rs['patched.pkg.bin'], cam.restore_path: rs['restore-stock.pkg.bin']}
+            want = release_package_hashes(rs, cam)
             want.update({n[len('card/'):]: h for n, h in rs.items() if n.startswith('card/')})
             if want != sums:
                 bad += 1
                 print(f'  FAIL  file list/hashes differ from {rel_dir}/SHA256SUMS')
             else:
                 print(f'  OK    matches {rel_dir}/SHA256SUMS')
-        except Refuse as e:
-            print(f'  note: {e}; checked the local manifest only')
     else:
         print(f'  note: no RELEASE metadata found; checked the local manifest only')
     if bad:
@@ -559,10 +584,11 @@ def cmd_list(a):
 # ---------------------------------------------------------------- one-press mode
 def vkey(name):
     clean = name.split('/')[-1]
-    m = re.fullmatch(r'v(\d+(?:\.\d+)*)([a-z]?)', clean)
+    m = re.fullmatch(r'v(\d+(?:\.\d+)*)(?:([a-z])(\d*))?', clean)
     if not m:
-        return (-1,)
-    return tuple(int(x) for x in m.group(1).split('.')) + (ord(m.group(2)) - 96 if m.group(2) else 0,)
+        return (), '', 0
+    version, suffix, revision = m.groups()
+    return tuple(map(int, version.split('.'))), suffix or '', int(revision or 0)
 
 
 def latest_release(camera_id: Optional[str] = None):
@@ -647,7 +673,7 @@ def copy_synced(src, dst):
 
 
 def copy_to_card(build, card, camera: Camera):
-    """Update file + LOOKS.BIN always; BUNDLES.BIN, MOVIE.BIN and AP.BIN only if the card has none (they hold the user's settings)."""
+    """Copy the update and starter files, keeping the user's camera settings."""
     dco = card / 'DCOLYMP'
     try:
         dco.mkdir(exist_ok=True)
@@ -664,9 +690,14 @@ def copy_to_card(build, card, camera: Camera):
     mod = card / camera.mod_dir
     mod.mkdir(exist_ok=True)
     check = [f'DCOLYMP/{camera.card_name}']
-    if (build / camera.mod_dir / 'LOOKS.BIN').exists():
-        copy_synced(build / camera.mod_dir / 'LOOKS.BIN', mod / 'LOOKS.BIN')
-        check.append(f'{camera.mod_dir}/LOOKS.BIN')
+    looks = build / camera.mod_dir / 'LOOKS.BIN'
+    if looks.is_file():
+        card_looks = mod / 'LOOKS.BIN'
+        if camera.id == 'em1mk2' and card_looks.exists():
+            print(f'  kept your existing {camera.mod_dir}/LOOKS.BIN (your saved looks)')
+        else:
+            copy_synced(looks, card_looks)
+            check.append(f'{camera.mod_dir}/LOOKS.BIN')
     if (build / camera.mod_dir / 'BUNDLES.BIN').exists():
         if (mod / 'BUNDLES.BIN').exists():
             print(f'  kept your existing {camera.mod_dir}/BUNDLES.BIN (your saved looks)')
@@ -702,16 +733,19 @@ def cmd_easy(a):
     here = Path(__file__).resolve().parent
     cam = get_camera(getattr(a, 'camera', None))
     rel = latest_release(cam.id)
+    _, _, _, cam = load_release(rel, cam.id)
     clean_rel = rel.split('/')[-1]
     print(f'Caduceus [{cam.name}] one-press build: {clean_rel}\n')
     out = here / f'Caduceus-{cam.id}-{clean_rel}'
     stock = find_stock(cam)
     if stock is None:
         data = fetch_stock(cam)
-        if sha(data) == cam.stock_sha:
-            (here / 'cache').mkdir(exist_ok=True)
-            (here / 'cache' / cam.stock_name).write_bytes(data)
-            stock = here / 'cache' / cam.stock_name
+        actual = sha(data)
+        if actual != cam.stock_sha:
+            raise Refuse(f'Downloaded stock firmware SHA-256 is {actual}; expected {cam.stock_sha}.')
+        stock = here / 'cache' / cam.stock_sha / cam.stock_name
+        stock.parent.mkdir(parents=True, exist_ok=True)
+        stock.write_bytes(data)
     else:
         print(f'Using the OM file already on this computer: {stock}')
     cmd_build(argparse.Namespace(out=str(out), release=rel, camera=cam.id, stock=str(stock) if stock else None))

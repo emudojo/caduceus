@@ -19,7 +19,7 @@ Checks (docs/OMD-EM1-II/ASPECT.md §6.6):
      resolver 0x60e59f78 run natively (caller stub, frame 24) for values 1,2,3,4,9,6,7 -> {kind, id}.
 Not emulated: the widget draw / blitter (0x60d7aaea -> 0x60d7909a) and whether the camera writes the OSD component.
 """
-import json, os, struct, sys
+import argparse, json, os, struct, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,11 +27,9 @@ sys.path.insert(0, str(ROOT / 'tools'))
 sys.path.insert(0, str(ROOT / 'external/oly_fw_analysis/tools'))
 sys.path.insert(0, str(ROOT / 'patches/omdem1mk2/aspect_icons'))
 import omdem1mk2_emu_validator as V  # noqa: E402
+from omdem1mk2_emu_rules import ROM_MEMSET  # noqa: E402
 from penf_emulator import Region, execute  # noqa: E402
 
-SECS = [(0x60021020, 0x600de000), (0x600de000, 0x60257800), (0x602ae000, 0x60580800), (0x60591800, 0x605d3000),
-        (0x605d5000, 0x6078f000), (0x60796000, 0x60bc8800), (0x60bf1000, 0x612e7000), (0x61300000, 0x613ed000),
-        (0x613f6800, 0x6146d000)]
 SITES = {0x60e6a0ed: (0x60e6a0e7, 0x60e6a0fc), 0x60e70c24: (0x60e70c1e, 0x60e70c33)}
 STK, OUT, SELF = 0x9f000000, 0x9f100000, 0x9f200000
 SCP_REC = 0x611329f8
@@ -40,12 +38,8 @@ GETTER, TABLE_PTR = 0x60d76dc9, 0x61fbc3e0
 OSD_BASE0 = 0xa2c91000
 
 
-def main_regions(img, perm='rx'):
-    out = []
-    for i, (lo, hi) in enumerate(SECS):
-        out.append(Region(f's{i}', lo, img[lo - V.B:hi - V.B], perm))
-        out.append(Region(f'u{i}', lo + 0x40000000, img[lo - V.B:hi - V.B], 'r'))   # uncached alias 0xa0..
-    return out
+def main_regions(img):
+    return list(V.main_regions(img, uncached=True))
 
 
 def cell(img, site, v):
@@ -115,6 +109,20 @@ def getter(img, o, osd, bid):
     return dict(entry=entry, desc=desc, fmt=fmt, w=w, h=h, len=ln, payload=pay, stream=stream)
 
 
+def reference_bitmaps(path, entries):
+    """Read the expected descriptors and streams from the sealed reference edits."""
+    edits = {
+        int(e['addr'], 16): bytes.fromhex(e['new'])
+        for e in json.loads(path.read_text(encoding='utf-8'))['edits'] if e['kind'] == '0x100'
+    }
+    result = {}
+    for bid, entry in entries.items():
+        desc, = struct.unpack('<I', edits[entry])
+        fmt, w, h, _, _, _, length, payload, _ = struct.unpack('<6H3I', edits[desc - 0x40000000])
+        result[bid] = (fmt, w, h, edits[payload - 0x40000000][:length])
+    return result
+
+
 SENT = 0x5a5a5a5a
 
 
@@ -155,17 +163,24 @@ def resolve(img, value, n, lst):
     stk = bytearray(0x2000)
     struct.pack_into('<I', stk, 0x1000 + 4, OUT)
     rg = main_regions(img) + [Region('call', CALL, code, 'rx'), Region('stk', STK, bytes(stk), 'rw'),
+                              Region('rom_memset', ROM_MEMSET[0], bytes.fromhex(ROM_MEMSET[1]), 'rx'),
                               Region('out', OUT, bytes(0x60), 'rw', True)]
     r = execute(rg, {'pc': CALL, 'sp': STK + 0x1000, 'd0': value, 'd1': n, 'a1': lst, 'a0': 0}, CALL + 7, limit=5000)
     if r['fault'] or r['registers']['pc'] != CALL + 7:
         return ('fault', hex(r['registers']['pc']), r['fault'])
     m = {x['name']: bytes.fromhex(x['hex']) for x in r['memory']}
     kind, bid = struct.unpack_from('<HH', m['out'], 0)
+    if kind == 5:
+        return kind, m['out'][8:74].decode('utf-16-le').split('\0', 1)[0]
     return (kind, bid) if kind else None
 
 
 def main():
-    spec = sys.argv[1]
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument('spec')
+    parser.add_argument('--reference', type=Path, help='Compare the new bitmaps byte-for-byte with this release')
+    args = parser.parse_args()
+    spec = args.spec
     old, new = V.image(None), V.image(spec)
     fails = 0
     print('C  cell builders, values 0..12 (stock -> patched index)')
@@ -223,11 +238,17 @@ def main():
     import build as IC
     from osd_extract import decode_rle
     o, osd = osd_component(spec)
-    imgs = IC.build_images(o)
     sys.path.insert(0, str(ROOT / 'patches/omdem1mk2/aspect'))
     import importlib.util
     spec_a = importlib.util.spec_from_file_location('aspect_build', ROOT / 'patches/omdem1mk2/aspect/build.py')
     AB = importlib.util.module_from_spec(spec_a); spec_a.loader.exec_module(AB)
+    if args.reference:
+        baseline = reference_bitmaps(args.reference, AB.ICON_ENTRY)
+        imgs = tiles = {}
+    else:
+        baseline = {}
+        imgs = IC.build_images(o)
+        tiles = IC.tile_labels(o)
     hook = not any(e['kind'] == '0x101' for e in json.loads(Path(spec).read_text())['edits'])
     diag = os.environ.get('EM1_ICON_DIAG') == '1'
     if hook:
@@ -239,7 +260,6 @@ def main():
         n = len(others)
         fails += same != n
         print(f'   other ids: patched getter = stock for {same}/{n}' + ('' if same == n else '  !'))
-    tiles = IC.tile_labels(o)
     for bid, ref in ((476, None), (5866, None), (6668, ('6524', 'white')), (7086, None if diag else ('219', 'white')),
                      (6669, ('tile', '6524')), (7087, ('tile', '219'))):
         g = getter(new, o, osd, bid)
@@ -248,8 +268,11 @@ def main():
             print(f'   id {bid}: {g}  !')
             continue
         px, *_ = decode_rle(g['stream'], g['w'], g['h'])
-        want_px = None if ref is None else (tiles[ref[1]] if ref[0] == 'tile' else imgs[ref]).astype('uint8').tobytes()
-        ok = g['fmt'] == 14 and (want_px is None or px == want_px)
+        if bid in baseline:
+            ok = (g['fmt'], g['w'], g['h'], g['stream']) == baseline[bid]
+        else:
+            want_px = None if ref is None else (tiles[ref[1]] if ref[0] == 'tile' else imgs[ref]).astype('uint8').tobytes()
+            ok = g['fmt'] == 14 and (want_px is None or px == want_px)
         if hook and bid in AB.ICON_ENTRY:
             ok = ok and g['entry'] == AB.ICON_ENTRY[bid]
         if diag and bid == 7086:

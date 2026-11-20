@@ -16,7 +16,7 @@ import { CAMERAS, type Cam } from './cameras';
 import { OM3_FWS, OM3_REPO, bankToPack, decodeOm3Code, isOm3Code, looksBinToPack, om3Fw, packToBank, setOm3Fw } from './targets/om3';
 import { rrpreset } from './rapidraw';
 import { TARGETS, targetById } from './targets';
-import { EM1_REPO_DOC, em1Dropped, encodeEm1LooksBin, toEm1 } from './targets/em1mk2';
+import { EM1_CARD_RELEASE, EM1_REPO_DOC, em1Dropped, encodeEm1LooksBin, toEm1 } from './targets/em1mk2';
 import { recipeCard } from './targets/recipe';
 import { previewToneLut } from './tone';
 
@@ -736,14 +736,14 @@ function schedulePreview() {
   requestAnimationFrame(() => {
     previewQueued = false;
     const pg = document.getElementById('pv-grain');
-    if (pg) pg.hidden = cam().lookNr;
+    if (pg) pg.hidden = CAM !== 'ep7';
     if (!srcData || !canvas) return;
     if (canvas.width !== srcData.width || canvas.height !== srcData.height) { canvas.width = srcData.width; canvas.height = srcData.height; }
     const ctx = canvas.getContext('2d')!;
     const l = cur();
     if (S.compare || !l) { ctx.putImageData(srcData, 0, 0); return; }
     const out = ctx.createImageData(srcData.width, srcData.height);
-    renderLook(srcData, out, CAM === 'om3' ? toOm3(l).look ?? l : CAM === 'em1mk2' ? toEm1(l) : l, { advice: S.advice, nr: cam().lookNr, grain: cam().lookNr ? 'off' : S.grain });
+    renderLook(srcData, out, CAM === 'om3' ? toOm3(l).look ?? l : CAM === 'em1mk2' ? toEm1(l) : l, { advice: S.advice, nr: cam().lookNr, grain: CAM === 'ep7' ? S.grain : 'off' });
     ctx.putImageData(out, 0, 0);
   });
 }
@@ -981,7 +981,7 @@ function setupDialog(first = false) {
     h('h3', {}, 'OM SYSTEM OM-3'),
     row('Caduceus for OM-3 v0.19 or later', 'Exports OM3MOD/LOOKS.BIN and NAMES.BIN (choose your firmware version on export). The firmware is a separate project: never use E-P7 firmware on an OM-3.', 'om3'),
     h('h3', {}, 'Olympus OM-D E-M1 Mark II'),
-    row('Caduceus for E-M1 II v0.3 or later (test builds)', 'Exports EM1MOD/LOOKS.BIN, the same file as the E-P7. Looks are picked in Color Creator; the preview shows what this body applies (saturation, hue, light, highlights / midtones / shadows). Never use E-P7 firmware on an E-M1 II.', 'em1mk2'),
+    row(`Caduceus for E-M1 II ${EM1_CARD_RELEASE} (test build)`, 'Exports EM1MOD/LOOKS.BIN in the shared LOOKS.BIN v3 format. Looks are picked in Color Creator; the preview shows what this body applies (saturation, hue, light, highlights / midtones / shadows). Never use E-P7 firmware on an E-M1 II.', 'em1mk2'),
     h('p', { class: 'help' }, 'Other bodies aren\'t supported yet: ', h('a', { href: `${GH}/blob/main/docs/BODIES.md`, target: '_blank', rel: 'noopener' }, 'see where each one stands'), '.'));
   const dlg = modal(first ? 'Welcome to the Caduceus Control Panel' : 'Your camera', body);
 }
@@ -1032,7 +1032,7 @@ function em1Body(): HTMLElement {
     probs.length
       ? h('div', { class: 'problems-box' }, h('b', {}, `${probs.length} problem(s) to fix first:`), h('ul', { class: 'problems' }, ...probs.slice(0, 12).map((p) => h('li', {}, p))))
       : h('p', { class: 'ok' }, `✓ ${S.pack.looks.length} looks. Copy EM1MOD/LOOKS.BIN to the card (slot 1 or 2).`),
-    h('p', { class: 'help' }, 'Same file as the E-P7 (needs E-M1 II firmware v0.3 or later). On the camera: half-press once after power-on, then pick looks in the Color Creator editor; the banner shows C1 when the card file is loaded.'),
+    h('p', { class: 'help' }, `Use E-M1 II Caduceus ${EM1_CARD_RELEASE} or later. After power-on, half-press the shutter and open Color Creator. The banner shows C1 when the camera has loaded the card file.`),
     h('p', { class: 'help' }, 'Applied on the E-M1 II: saturation, hue and light per colour, and highlights / midtones / shadows. Not yet: WB shift, effects, vignette, grain, blacks / whites, black & white.'),
     ...(dropped.length ? [h('p', { class: 'help' }, 'Parts these looks keep in the file but the E-M1 II ignores for now: ',
       dropped.slice(0, 10).map(([i, d]) => `${S.pack.looks[i].name} (${d.join(', ')})`).join('; '), dropped.length > 10 ? '…' : '')] : []),

@@ -25,9 +25,6 @@ sys.path.insert(0, str(ROOT / 'external/oly_fw_analysis/tools'))
 import omdem1mk2_emu_validator as V  # noqa: E402
 from penf_emulator import Region, execute  # noqa: E402
 
-SECS = [(0x60021020, 0x600de000), (0x600de000, 0x60257800), (0x602ae000, 0x60580800), (0x60591800, 0x605d3000),
-        (0x605d5000, 0x6078f000), (0x60796000, 0x60bc8800), (0x60bf1000, 0x612e7000), (0x61300000, 0x613ed000),
-        (0x613f6800, 0x6146d000)]
 FUNCS = {'s_fopen': 0x6062ce6a, 's_fclose': 0x6062ce73, 's_fread': 0x6062cff9, 's_fseek': 0x6062d0f1,
          's_ftell': 0x6062d087, 's_malloc': 0x600231fe, 's_free': 0x6002323d}
 STUB, CTL, FILE, HEAP, STK = 0x9e000000, 0x9e100000, 0x9e200000, 0x9e400000, 0x9f000000
@@ -41,11 +38,16 @@ TC = Path('/home/hertzel/ep7fw-toolchains/mn10300/bin')
 
 
 def stubs():
+    return assemble_fixture(ROOT / 'tools/emu_fixtures/em1_fs_stubs.s', STUB, CTL=CTL)
+
+
+def assemble_fixture(source, address, **symbols):
     with tempfile.TemporaryDirectory() as t:
         t = Path(t)
-        subprocess.run([str(TC / 'mn10300-elf-as'), str(ROOT / 'tools/emu_fixtures/em1_fs_stubs.s'), '-o', str(t / 'o')], check=True)
-        subprocess.run([str(TC / 'mn10300-elf-ld'), f'--section-start=.text={STUB:#x}', '-e', '_start', str(t / 'o'),
-                        '-o', str(t / 'e'), f'--defsym=CTL={CTL:#x}'], check=True)
+        subprocess.run([str(TC / 'mn10300-elf-as'), str(source), '-o', str(t / 'o')], check=True)
+        subprocess.run([str(TC / 'mn10300-elf-ld'), f'--section-start=.text={address:#x}', '-e', '_start',
+                        str(t / 'o'), '-o', str(t / 'e'),
+                        *(f'--defsym={name}={value:#x}' for name, value in symbols.items())], check=True)
         subprocess.run([str(TC / 'mn10300-elf-objcopy'), '-O', 'binary', str(t / 'e'), str(t / 'b')], check=True)
         nm = subprocess.run([str(TC / 'mn10300-elf-nm'), str(t / 'e')], capture_output=True, text=True).stdout
         syms = {p[2]: int(p[0], 16) for p in (l.split() for l in nm.splitlines()) if len(p) == 3}
@@ -67,18 +69,21 @@ def looks_file(bad=False):
     return bytes(f)
 
 
-def run_presses(img, code, ready_from, filedata, presses, events=None, secbits=0x1ff):
+def run_presses(img, code, ready_from, filedata, presses, events=None, secbits=0x1ff, *, state=None):
     ctl = bytearray(0x40)
     struct.pack_into('<IIIIII', ctl, 0, ready_from, 0, len(filedata), FILE, HEAP, 0)
-    pblk = bytearray(0x200)
-    struct.pack_into('<IH', pblk, 0, 0x50314d45, HANDLE)
+    if state is None:
+        pblk = bytearray(0x200)
+        struct.pack_into('<IH', pblk, 0, 0x50314d45, HANDLE)
+    else:
+        pblk = bytearray(state)
     pram = bytearray(0x1000)
     struct.pack_into('<H', pram, 0x4ae, HANDLE)
     heap = bytes(0x4000)
     out = []
     events = events or [HALF] * presses
     for k, ev in enumerate(events):
-        rg = [Region(f's{i}', lo, img[lo - V.B:hi - V.B], 'rx') for i, (lo, hi) in enumerate(SECS)]
+        rg = list(V.main_regions(img))
         rg += [Region('stub', STUB, code, 'rx'), Region('ctl', CTL, bytes(ctl), 'rw', True),
                Region('file', FILE, filedata, 'r'), Region('heap', HEAP, heap, 'rw', True),
                Region('p', 0xa1b00000 + (HANDLE << 7), bytes(pblk), 'rw', True),
@@ -105,7 +110,7 @@ def run_presses(img, code, ready_from, filedata, presses, events=None, secbits=0
         state, = struct.unpack_from('<H', pblk, 6)
         nlooks, = struct.unpack_from('<H', pblk, 28)
         out.append((state, pblk[82], struct.unpack_from('<I', ctl, 4)[0], nlooks))
-    return out
+    return out, bytes(pblk), heap
 
 
 def main():
@@ -122,20 +127,20 @@ def main():
              ('badcrc', new, 1, bad, 3,
               lambda o: [x[0] for x in o] == [0xffff] * 3 and o[-1][2] == 1)]
     for name, img, ready, data, presses, want in cases:
-        o = run_presses(img, code, ready, data, presses)
+        o, _, _ = run_presses(img, code, ready, data, presses)
         ok = all(not (isinstance(x, tuple) and x and x[0] == 'fault') for x in o) and want(o)
         fails += not ok
         print(f'{name:7s} (state, tries, fopen calls, looks) per press: {o}' + ('' if ok else '  !'))
     other = [0x02000101, 0x02010101, 0x04020301, 0x07010001, 0x01000100, 0x02000200, 0, 0xffffffff]
-    o = run_presses(new, code, 1, good, 0, events=other)
+    o, _, _ = run_presses(new, code, 1, good, 0, events=other)
     ok = len(o) == len(other) and all(x[0] == 0 and x[1] == 0 and x[2] == 0 for x in o)
     fails += not ok
     print(f'events  (no half-press: {[hex(e) for e in other]}): {o}' + ('' if ok else '  !'))
-    o = run_presses(new, code, 1, good, 0, events=[HALF] * 3, secbits=0x17f)
+    o, _, _ = run_presses(new, code, 1, good, 0, events=[HALF] * 3, secbits=0x17f)
     ok = len(o) == 3 and all(x[0] == 0 and x[1] == 0 and x[2] == 0 for x in o)
     fails += not ok
     print(f'nosect  (half-press, section 8 bit clear): {o}' + ('' if ok else '  !'))
-    o = run_presses(new, code, 1, good, 0, events=[0x04020301, 0x02010100, 0x02000101])
+    o, _, _ = run_presses(new, code, 1, good, 0, events=[0x04020301, 0x02010100, 0x02000101])
     ok = len(o) == 3 and [x[0] for x in o] == [0, 1, 1] and o[-1][2] == 1
     fails += not ok
     print(f'mixed   (dial, half-press 0x02010100, release): {o}' + ('' if ok else '  !'))

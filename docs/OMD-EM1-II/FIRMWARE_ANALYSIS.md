@@ -5,7 +5,7 @@
 **Camera Model**: Olympus OM-D E-M1 Mark II (Internal model ID `125` / `0x1250`)  
 **Firmware Version**: v3.70 (Internal version field `0x3700`)  
 **File Size**: 93,050,944 bytes (88.74 MiB)  
-**SHA-256**: `f0c25dd80e3fe2f38af0bc515f250692c47c42758eef411dfaef1f9674dd66dc`  
+**SHA-256**: `691a8a8e90af75b3848b70856a3a49ef24d72394cdfd2766fa37bdfe6325de70` (OM catalog download, 2026-11-20; earlier builds used `f0c25dd8…`)  
 
 ---
 

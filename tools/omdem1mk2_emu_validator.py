@@ -9,16 +9,15 @@ Only section 1/2 code, the hash RAM and a stack are mapped: any other access sto
 Read-only; needs the built engine (external/oly_fw_analysis/toolchains/mn103-gnu-build/penf-mn103).
 """
 import argparse, json, struct, sys
+from functools import lru_cache
 from pathlib import Path
+from omdem1mk2_layout import BASE as B, loaded_sections
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'external/oly_fw_analysis/tools'))
 from penf_emulator import Region, execute  # noqa: E402
 
-B = 0x60021020
 STOCK = ROOT / 'em1mk2/extracted/00_0100_40560020.decoded.bin'
-SEC1 = (0x600de000, 0x60257800)
-SEC2 = (0x602ae000, 0x60580800)
 HASH_RAM = (0x62254000, 0x62257000)       # buckets 0x622540f4 (128 x 4) + nodes 0x622542f4 (1215 x 8)
 STACK, SP = 0x18010000, 0x18010f00
 CALLER = 0x18020000
@@ -32,15 +31,28 @@ def image(spec):
             if e.get('kind', '0x100') == '0x100':
                 a = int(e['addr'], 16) - B
                 n = bytes.fromhex(e['new'])
+                if d[a:a + len(n)] != bytes.fromhex(e['expect']):
+                    raise ValueError(f"Stock bytes differ at {e['addr']}")
                 d[a:a + len(n)] = n
     return bytes(d)
+
+
+@lru_cache(maxsize=4)
+def main_regions(img, uncached=False):
+    regions = []
+    for index, (start, end) in enumerate(loaded_sections(img)):
+        name = f's{index}'
+        data = img[start - B:end - B]
+        regions.append(Region(name, start, data, 'rx'))
+        if uncached:
+            regions.append(Region(f'u{index}', start + 0x40000000, data, 'r', alias_of=name))
+    return tuple(regions)
 
 
 def call(img, ram, target, mask, frame, regs):
     code = b'\xdd' + struct.pack('<i', target - CALLER) + bytes([mask, frame]) + b'\xcb'
     regions = [Region('caller', CALLER, code, 'rx'),
-               Region('sec1', SEC1[0], img[SEC1[0] - B:SEC1[1] - B], 'rx'),
-               Region('sec2', SEC2[0], img[SEC2[0] - B:SEC2[1] - B], 'rx'),
+               *main_regions(img)[1:3],
                Region('hash', HASH_RAM[0], ram, 'rw', capture=True),
                Region('stack', STACK, bytes(0x1000), 'rw')]
     r = execute(regions, dict({'sp': SP, 'pc': CALLER}, **regs), CALLER + 7, limit=2_000_000)

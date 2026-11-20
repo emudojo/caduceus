@@ -27,15 +27,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 sys.path.insert(0, str(ROOT / 'external/oly_fw_analysis/tools'))
+sys.path.insert(0, str(ROOT))
 
+import caduceus
 import cameras
 
 try:
     import oly_container as oc
 except ImportError:
     # Fallback to local container helpers from caduceus
-    sys.path.insert(0, str(ROOT))
-    import caduceus as oc
+    oc = caduceus
 
 
 def sha(b):
@@ -53,8 +54,10 @@ def resolve(kind, addr, main_base: int):
 
 def build(spec, stock_bytes, camera=None):
     cam = camera or cameras.get_camera(spec.get('camera'))
-    if sha(stock_bytes) != cam.stock_sha:
-        raise ValueError(f'stock firmware hash mismatch: got {sha(stock_bytes)}, expected {cam.stock_sha}')
+    expected = caduceus.release_stock_hash(spec, cam)
+    actual = sha(stock_bytes)
+    if actual != expected:
+        raise ValueError(f'stock firmware hash mismatch: got {actual}, expected {expected}')
     blocks = oc.parse(stock_bytes)
     # Reconstruct check
     if hasattr(oc, 'reconstruct'):
@@ -149,12 +152,14 @@ def build(spec, stock_bytes, camera=None):
                               changed_payload_bytes=changed)
 
 
-def find_stock_file(cam: cameras.Camera) -> Path:
+def find_stock_file(cam: cameras.Camera, expected=None) -> Path:
+    expected = expected or cam.stock_sha
     candidates = [
         ROOT / 'stock_firmware' / cam.stock_name,
         ROOT / 'stock_firmware' / cam.id / cam.stock_name,
         ROOT / 'stock_firmware' / f"omd{cam.id}" / cam.stock_name,
         ROOT / cam.id / 'firmware' / cam.stock_name,
+        ROOT / 'cache' / expected / cam.stock_name,
         ROOT / 'cache' / cam.stock_name,
     ]
     for alt in cam.alt_stock_names:
@@ -166,7 +171,7 @@ def find_stock_file(cam: cameras.Camera) -> Path:
             ROOT / alt,
         ])
     for p in candidates:
-        if p.is_file() and p.stat().st_size == cam.stock_size:
+        if p.is_file() and p.stat().st_size == cam.stock_size and sha(p.read_bytes()) == expected:
             return p
     raise ValueError(f"Stock firmware file for {cam.name} not found. Place {cam.stock_name} in stock_firmware/ or pass --stock.")
 
@@ -182,23 +187,24 @@ def main():
         sys.exit('output directory must not exist')
     spec = json.loads(a.spec.read_text())
     cam = cameras.get_camera(a.camera or spec.get('camera'))
-    stock_path = a.stock if a.stock else find_stock_file(cam)
+    expected = caduceus.release_stock_hash(spec, cam)
+    stock_path = a.stock if a.stock else find_stock_file(cam, expected)
     stock_bytes = stock_path.read_bytes()
     pkg, restore, info = build(spec, stock_bytes, camera=cam)
     a.out.mkdir(parents=True)
     (a.out / 'patched.pkg.bin').write_bytes(pkg)
     (a.out / 'restore-stock.pkg.bin').write_bytes(restore)
-    info.update(spec=str(a.spec), spec_sha256=sha(a.spec.read_bytes()), stock_sha256=cam.stock_sha,
+    info.update(spec=str(a.spec), spec_sha256=sha(a.spec.read_bytes()), stock_sha256=expected,
                 patched_sha256=sha(pkg), restore_sha256=sha(restore), bytes=len(pkg),
                 camera=cam.id, camera_name=cam.name,
                 camera_contacted=False,
                 note=f'Not SD-loadable by name. Card update name is {cam.card_name}. Container validity != bootability.')
-    (a.out / 'build.json').write_text(json.dumps(info, indent=2) + '\n')
+    (a.out / 'build.json').write_text(json.dumps(info, indent=2) + '\n', encoding='utf-8', newline='\n')
     print(json.dumps(info, indent=2))
 
 
 if __name__ == '__main__':
     try:
         main()
-    except ValueError as e:
+    except (ValueError, caduceus.Refuse) as e:
         sys.exit(f'error: {e}')

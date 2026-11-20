@@ -9,9 +9,9 @@ Anything outside is never copied to RAM (the v0.1-v0.3b1 preset-table bug).
 """
 import json, struct, sys
 from pathlib import Path
+from omdem1mk2_layout import BASE as B, loaded_sections
 
 ROOT = Path(__file__).resolve().parents[1]
-B = 0x60021020
 D = (ROOT / 'em1mk2/extracted/00_0100_40560020.decoded.bin').read_bytes()
 # Section ends are read from the release's own image, so an edited loaded-end word (code-space probe sp1:
 # patches/omdem1mk2/space_probe) is honoured; the descriptor table and getter layout are still checked below.
@@ -21,7 +21,6 @@ for _e in json.load(open(sys.argv[1]))['edits']:
         _a = int(_e['addr'], 16) - B
         _P[_a:_a + len(_e['new']) // 2] = bytes.fromhex(_e['new'])
 D = bytes(_P)
-w = lambda a: struct.unpack_from('<I', D, a - B)[0]
 
 # Edits outside section loads that are known to reach RAM another way.
 KNOWN = {
@@ -37,17 +36,7 @@ KNOWN_RANGES = [
     (0x60258000, 0x602ae000, '.data init image (copied to RAM at boot)'),
 ]
 
-ends = []
-jt = 0x6004354c  # jump table loaded at 0x60042b41 (mov 0x6004354c,a0)
-for i in range(9):
-    t = w(jt + 4 * i)
-    assert D[t - B] == 0xfc and D[t - B + 1] == 0xcc, 'end getter stub layout changed'
-    ends.append(struct.unpack_from('<I', D, t - B + 2)[0])
-ranges = [(B, w(0x60027450))]  # resident base
-for i in range(9):
-    st = w(0x60027450 + 12 * i)
-    if ends[i] > st:
-        ranges.append((st, ends[i]))
+ranges = loaded_sections(D)
 
 bad = 0
 for e in json.load(open(sys.argv[1]))['edits']:
