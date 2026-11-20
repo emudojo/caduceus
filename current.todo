@@ -170,8 +170,10 @@ wheel's vividness also stays 0, that is a separate symptom.
 ### Priority 2: halation (E-P7 version, global stage; plan and owner decisions: docs/OMD-EM1-II/HALATION.md)
 * Step 2 (NOW): sites found statically (docs/OMD-EM1-II/HALATION.md "Step 2"): flag hook 0x604228fc, blend setup
   0x60398ee1, combiner 11/12 table words 0x6053e164 / 0x6053e16c (no weight getter here), CPU-pass services.
-  Flag converter 0x6042285e emulated (tools/omdem1mk2_emu_artflags.py). Still to do: the spare remembered setting;
-  emulate the kind mapper 0x6042257f, combiner 11/12 stubs and the blend setup; re-derive the mapper 0x6006888f ranges.
+  Flag converter 0x6042285e emulated (tools/omdem1mk2_emu_artflags.py). Stage setting = sid 961 (key 0xF709[0]):
+  0..3 round-trip and survival of every boot reset emulated (tools/omdem1mk2_emu_spare_setting.py); power-off survival
+  needs a camera test. Still to do: emulate the kind mapper 0x6042257f, combiner 11/12 stubs and the blend setup;
+  re-derive the mapper 0x6006888f ranges.
 * Step 3: bloom route (one camera test). Step 4: halation pass + gate + Halo row in color_creator_wheel, emulated first.
 * Code goes in the 100 KB region; the 162 KB gap 0x60bc8800..0x60bf1000 can be probed the same way if needed.
 

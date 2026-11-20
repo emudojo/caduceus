@@ -36,7 +36,7 @@ brightness, gradual daylight fade; credit in NOTICE).
 | Soft Focus route (bloom: flag hook, blend setup, combiner 11, callback) | callback `0x60391959`, blend setup `0x60398f5f`, effect selector `0x603f1653` exact; flag hook ≈ `0x604228fc`, Soft Focus entry ≈ `0x6039517c` / `0x60398ee1` (prefix match); combiner 11/12 calls not found by bytes |
 | CPU pass route (grain_cpu r2: work-list hook, window / mapper, lock / unlock) | not found by bytes; needs code-shape search |
 | Watchdog 10 s → 30 s (E-P7 v0.31b) | E-M1 II stock write path confirmed up to the hardware handshake. See below. |
-| Spare remembered setting for the stage | to find |
+| Spare remembered setting for the stage | **sid 961** (key `0xF709[0]`), see "Stage setting" below; power-off survival needs one camera test |
 | Code space ~1.8 KB + tables; one malloc ≤ 16 KB per shot | 100 KB of loaded gap confirmed on camera with sp1. The actual halation allocation and code placement still need verification. |
 | Camera control | a Halo row/page in the look editor (`color_creator_wheel`) |
 
@@ -86,8 +86,28 @@ E-M1 II disassembly.
   so the E-P7 plain-look grain route does not port; halation goes through flag 0x80 + the blend word instead.
 - **Capture fields do not shift uniformly:** picture mode +24203, profile +24233 (+150 vs E-P7) but Art Effect +24951
   (+166). Capture kinds 0x2001 / 0x2006 / 0x1008 / 0x1006 appear unchanged in the kind mapper `0x6042257f`.
-- Still open: Monotone's picture-mode value, the job key of stock colour modes, the mapper's 0 return, and the spare
-  remembered setting (separate report).
+- Still open: Monotone's picture-mode value, the job key of stock colour modes, and the mapper's 0 return.
+
+### Stage setting: sid 961 (2026-11-20)
+
+Report: [`plans/reports/research-261120-1400-em1ii-spare-setting.md`](../../plans/reports/research-261120-1400-em1ii-spare-setting.md).
+
+- **Sid 961, property key `0xF709` index 0** (E-P7 "sid − 2" mapping: COLOR1 highlight; this body never offers
+  picture modes 11/12). The key appears nowhere in code; the sid number only as two log line numbers and one GUI
+  resource id; it is in no descriptor, UI init table or editor list [S]. Validator lists −7..+7, default 0 = Off.
+- **Persistence [S]:** all settings live in property block 90 (table `0x600a29b0`, RAM `0x624e2000`, registry
+  `0xa2736c50`), shadowed to flash slots `0x40240000` / `0x40280000` ("fmem"). 961 is stored at `0x6250423a`.
+  What triggers the flash write (power-off or periodic) is not traced.
+- **Boot resets:** boot tail `0x601ac7cd` → store load `0x602daefb` → normal boot `0x602da762` (26-id list `0x604cd464`,
+  or the 628-id list `0x604ce176` + custom-bank copy when sid 10052 ≠ 0) and boot reasons 7/9 `0x602da77a` (6-id
+  list `0x604ce662`); reset primitive `0x602e5ba5`. 961 is in none of them. A full reset (1647-id list `0x604cd498`,
+  or `0x602e5acc` when the store check fails) sets it to 0 = Off.
+- **Emulated** (`tools/omdem1mk2_emu_spare_setting.py`): facade SetValue 0..3 → 0 and GetValue reads back; stored in
+  block 90; kept through all three boot paths while control sid 267 is reset where its lists say.
+- **Rules for the halation code:** SetValue does not range-check (7, 8, −8 are stored), so treat any value outside
+  0..3 as Off. The value is the same in every shooting mode and is saved in custom modes (C1..), like Color Creator
+  hue. Fallbacks: sid 981 (`0xF779[2]`, 0..3, default 1, one reader in the mode-12 mono branch) and 965.
+- **Camera test needed:** set the stage, power off and on, read it back.
 
 ## Stock watchdog write path (2026-11-20)
 

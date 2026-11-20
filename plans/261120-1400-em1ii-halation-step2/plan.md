@@ -5,7 +5,7 @@ Status: in progress (2026-11-20). Owner has no camera now: emulator and static w
 | Phase | Status | Done when |
 |---|---|---|
 | 1. Independent review of v0.4c16/c17 code | done | No firmware defect. Fixed: copy_to_card kept unreadable LOOKS.BIN; stock-not-found message; card-source stepping added to emu_color_creator. Section 1 tail shown unreferenced in catalog stock (docs/PORT_EM1MK2.md) |
-| 2a. Spare remembered setting for the halation stage | research running | Ranked sids with persistence / reset / reader evidence; top one round-trips 0..3 in the emulator |
+| 2a. Spare remembered setting for the halation stage | done (emulated) | Sid 961; tools/omdem1mk2_emu_spare_setting.py; power-off survival needs the camera |
 | 2b. Soft Focus / combiner / CPU-pass sites on E-M1 II | done (static) | Table in docs/OMD-EM1-II/HALATION.md "Step 2"; flag converter emulated (emu_artflags, in the release checks) |
 | 3. Next build | not needed yet | Phase 1 fixes are PC tools and harnesses only; v0.4c17 firmware unchanged |
 
