@@ -195,3 +195,12 @@ need confirmation before deciding whether to change the timeout.
   leave the photo untouched; locks == unlocks, frees balanced, the window mode restored.
 - **Not yet:** the wrapper and per-job decision (4a/4b), combiner neutral blend (4c), look tint (4e), Halo control (4f),
   time budget vs the 10 s watchdog (4g). Nothing of step 4 is in a release.
+- **Per-job marker (4b) [E, partial]:** the params block of each shot is a zeroed 32-byte stack local; the job constructor
+  `0x6038f173` allocates a new 15,484-byte job and copies it word for word to job+4..+35 (`0x6038f2a4`), so params+N =
+  job+4+N (job+8 request, job+16 flags). Marker = a magic byte hl_flag writes at params+31 → job+35 (combiner stub:
+  request − 11329). `tools/omdem1mk2_emu_job_marker.py`: constructor and work-list builder give identical results with
+  the byte 0 or 0xA5 except job+35 itself. Report: `plans/reports/research-261123-0838-em1ii-halation-job-marker.md`.
+  Still to prove: the blend setup, combiners and destructor with the marker set, and the other three constructor paths.
+- **Work list [E, open]:** items are 12 bytes; a synthetic job with only flag 0x80 gets dev / reduce `0x60398e6f` /
+  `0x6039905e` but the builder keeps the blend setup pointer pending in a2 and returns before storing it. A realistic job
+  (filled by `0x6041dda4` and the request) is needed to show where `0x60398ee1` lands before the wrapper route is final.
