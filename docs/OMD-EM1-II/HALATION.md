@@ -215,3 +215,18 @@ need confirmation before deciding whether to change the timeout.
   request − 11329). `tools/omdem1mk2_emu_job_marker.py`: constructor and work-list builder give identical results with
   the byte 0 or 0xA5 except job+35 itself. Report: `plans/reports/research-261123-0838-em1ii-halation-job-marker.md`.
   Still to prove: the blend setup, combiners and destructor with the marker set, and the other three constructor paths.
+
+### Step 4a: the colour-still route (2026-11-23, emulated; report `plans/reports/research-261123-1123-em1ii-plain-route-completion.md`)
+
+- **No CPU-visible developed image in stock [E]** (`tools/omdem1mk2_emu_plain_route.py`, real capture entry): for Vivid /
+  Natural / Color Creator stills the development item `0x603a5df6` (`0x603a44ca`) writes the main JPEG entry (format 0x0702)
+  directly. There is no record 0x1000 and no full-size 0x0302 record; the only 0x0302 record is the 160×120 EXIF thumbnail
+  intermediate (id 4 on 4:3, id 5 on other aspects). The development item waits for its request synchronously.
+- **4:3 jobs get three items, not four:** the last item `0x60391a9b` is appended only when job+23 (aspect index) ≠ 1
+  (`0x60390102`). The earlier "four items" result used aspect index 0, which is not a real value.
+- **Possible route (not built):** give the main JPEG entry +42 bit 3 (0x208) on marked jobs so development writes a
+  full-size record 5 (0x0302, stride = W, offsets 0, 2·W·H — the layout `hl_pass` accepts) and `0x60391a9b` encodes it;
+  run the pass in a wrapper behind the immediate at `0x6039011f` (data edit; runner calls it with a0 = job). Needs three
+  instruction hooks (main-entry flag `0x60421bbd`, the 4:3 aspect test in `0x603a573d`, the 4:3 append test `0x60390102`),
+  careful handling of the second (thumbnail) encode, and costs one extra full-size buffer (~40 MB) per marked shot. The
+  review image would show no halation. Alternative not yet tried: route marked jobs through the Art builder `0x60392e0d`.
