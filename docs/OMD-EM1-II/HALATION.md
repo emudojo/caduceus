@@ -1,6 +1,7 @@
 # Halation on the OM-D E-M1 Mark II (fw 3.70): port plan
 
-Status: **design, nothing built** (2026-11-13). Source: the E-P7 halation in this repo (`patches/halation`,
+Status (2026-11-23). The flag gate and CPU pass have emulator coverage. Routing the pass for ordinary colour stills is
+open. The design comes from the E-P7 halation in this repo (`patches/halation`,
 `docs/HALATION_RED.md` §14–17, on `patches/bloom` + `patches/grain_cpu` r2). The OM-3 version
 (androidfanman/caduceus-om3 v0.28, Apache-2.0, its own code after the E-P7 method) runs on different base firmware; only its
 tuning is a candidate for later (h2: u = 255v/(v+K) tables, 3 + 10 two-layer blur, chroma weight from the cell's mean
@@ -19,8 +20,8 @@ brightness, gradual daylight fade; credit in NOTICE).
 
 1. **One global stage** (Off / Low / Med / High = gmax 0 / 112 / 176 / 240), read at each shot from its own setting. It is
    not in any look slot, so picking a film, a look or a picture mode cannot change or drop it.
-2. **The gate is the shot, not the look:** the capture-flag hook adds the Soft Focus flag 0x80 (neutral blend, as on the
-   E-P7) when stage ≠ Off **and** the job is an ordinary still of a colour mode. Excluded: the capture kinds the E-P7
+2. The capture-flag hook adds the Soft Focus flag 0x80 when stage ≠ Off **and** the job is an ordinary still of a colour
+   mode. Step 4a verifies where the firmware can use that flag to schedule the blend. The gate excludes the capture kinds the E-P7
    skips for grain (0x2001, 0x2006, 0x1008, 0x1006), Monotone, Art Filters (they keep their own flags), movies, live view.
    If the job already has 0x80 (e.g. a look with bloom), the halation pass runs after that blend as on the E-P7.
 3. **Look values are only a fallback for the tint.** The E-P7's "0 = follow the look" stage is not used on this body.
@@ -74,8 +75,8 @@ E-M1 II disassembly.
   (`tools/omdem1mk2_emu_artflags.py`, 160 cases, stock and v0.4c17; part of the release checks).
 - **Flag hook `0x604228fc`**: stock `fa438c5ea000` (`movbu (24204,a3),d0; cmp 0,d0`), back at the `bne` `0x60422902`;
   a 6-byte `jmp d32; nop` fits as on the E-P7.
-- **Soft Focus blend setup `0x60398ee1`** (not `0x6039517c`), pushed only from `0x60393a6b` under `btst 128` on job+16
-  at `0x603939ff`; blend-setup hook `0x60398f5f` (same 6 bytes as the E-P7). **Emulated**
+- **Soft Focus blend setup `0x60398ee1`.** The Art work-list builder loads its address from `0x60393a6b` under
+  `btst 128` on job+16 at `0x603939ff`. The blend-setup hook `0x60398f5f` has the same 6 bytes as the E-P7. **Emulated**
   (`tools/omdem1mk2_emu_blend_setup.py`, entered with `calls` like a work-list item): finds records 0x1000 / 0x1061
   (bufidx), inits the request at **job+11364**, writes stage 0xf005 (+12) and effect 0x0402 (+656), copies both
   records to +20 / +84, describes the output at +340 (format 0x302, stride = width rounded up to 32, width, height) and
@@ -110,8 +111,8 @@ E-M1 II disassembly.
     mode 0..11 in `0xa274d410[cpu]`, then unlocks with the lock's token.
   - **For the halation pass:** test the buffer address first; use refused-range addresses as they are, and call the
     mapper only for the others. One window per CPU at a time, so a pass that walks two buffers in different buckets
-    must remap between them (or copy through a direct buffer). The work-list builder `0x60392e0d` writes items inline (no wl_final / wl_attach),
-  so the E-P7 plain-look grain route does not port; halation goes through flag 0x80 + the blend word instead.
+    must remap between them (or copy through a direct buffer). The Art work-list builder `0x60392e0d` writes items inline.
+    Step 4a traces the separate colour-still builder.
 - **Capture fields do not shift uniformly:** picture mode +24203, profile +24233 (+150 vs E-P7) but Art Effect +24951
   (+166). Capture kinds 0x2001 / 0x2006 / 0x1008 / 0x1006 appear unchanged in the kind mapper `0x6042257f`.
 - Still open: Monotone's picture-mode value, the job key of stock colour modes, and the mapper's 0 return.
@@ -137,7 +138,7 @@ Report: [`plans/reports/research-261120-1400-em1ii-spare-setting.md`](../../plan
   hue. Fallbacks: sid 981 (`0xF779[2]`, 0..3, default 1, one reader in the mode-12 mono branch) and 965.
 - **Camera test needed:** set the stage, power off and on, read it back.
 
-## Step 3: Soft Focus route for colour stills (2026-11-20, emulated; not camera-tested)
+## Step 3: Soft Focus flag gate for colour stills (2026-11-20)
 
 Patch `patches/omdem1mk2/halation` (`hl_flag.s`, `build.py`):
 
@@ -150,8 +151,8 @@ Patch `patches/omdem1mk2/halation` (`hl_flag.s`, `build.py`):
   it) is 1..3 (anything else Off), Art Effect byte capture+24951 = 0, picture mode capture+24203 < 100 and not 5
   (Monotone) or 12 (MONO) — the stock mono test `0x60342c32` returns 1 for 5, 12, 104 and 109/variant 2 — and the
   capture kind is not 0x2001 / 0x2006 / 0x1008 / 0x1006. Then flag 0x80 is ORed in; nothing else changes.
-- **What it does in step 3:** the stock Soft Focus blend (combiner 11/12, weight 600 / 424, a neutral glow) runs on
-  gated stills. The stage only switches it; strength and the look's glow colour are step 4 (combiner stubs + pass).
+- This patch sets the Soft Focus flag. The step 4a capture-job test below shows that the class-0
+  colour-still builder produces the same list with the flag set. The blend route for those jobs remains open.
 - **Emulated** (`tools/omdem1mk2_emu_halation_flag.py`): the real settings store holds the stage in sid 961 (written
   through the facade), the patched converter reads it back; 1,260 runs over stage 0..3 / 7 × Art Effect × picture
   mode × capture kind × seed give exactly the stock flag word, plus 0x80 in the 36 gated cases. A build with the
@@ -159,9 +160,8 @@ Patch `patches/omdem1mk2/halation` (`hl_flag.s`, `build.py`):
   stage. `emu_artflags` keeps the stock flag table for every Art Effect (gate off through Monotone).
 - **Test release `v0.4c18t`** (stage fixed at 2 because no control sets sid 961 yet): `tools/omdem1mk2_catalog_release.py
   --version v0.4c18t` after `EM1_HL_FORCE_STAGE=2 python3 patches/omdem1mk2/halation/build.py`.
-- **Camera test (when available):** Natural / Vivid / Color Creator stills show a soft glow; Monotone, an Art Filter and
-  an Art Effect shot look stock; bursts, RAW+JPEG and movie still work; no slowdown or restart. Then flash v0.4c17
-  back (or the next build) — the test release turns the glow on for every colour still.
+- For camera acceptance after routing is verified, Natural / Vivid / Color Creator stills show a soft glow with Halo
+  enabled. Monotone, Art Filter, Art Effect, bursts, RAW+JPEG and movie are regression checks.
 
 ## Stock watchdog write path (2026-11-20)
 
@@ -177,16 +177,30 @@ need confirmation before deciding whether to change the timeout.
 2. Find the spare remembered setting and the Soft Focus / CPU-pass sites; emulator fixtures for the capture job.
    Sites: done (static, above). Emulated: flag converter, stage setting sid 961, capture-kind mapper, selector +
    combiner 11/12 with the neutral-blend stubs, blend setup, bus-address mapper. **Step 2 done.**
-3. Step 3 built and emulated (above); test release `v0.4c18t` awaits the camera.
-3. Bloom route (useful alone, and it provides the finished YCbCr buffer), one camera test.
+3. The step 3 flag gate is emulated in `v0.4c18t`. Complete the colour-still blend route before the glow camera test.
 4. Halation pass with the global stage and gate above, then the camera control; emulator proof as in §"How", then camera.
 
 ## Step 4: tinted halation pass (in progress, 2026-11-23; plan `plans/261123-0838-em1ii-halation-step4/plan.md`)
 
-- **Route [S]:** the E-M1 blend setup is synchronous like the E-P7's: it queues the blend (`0x60390536`), waits for it
-  (`0x60390293` → `0x603901f3`) and only then frees the sources, so on return buffer 0x1000 holds the blended photo. The
-  work-list runner calls each item (job+10984, 12 B, function at +4) with `calls` and a0 = job (`0x60392765`,
-  `0x60392a0a`, `0x60392bba`). Repointing the immediate at `0x60393a6b` to a wrapper runs the pass there, as the E-P7 `gc_gs`.
+- **Blend completion [S].** `0x60398ee1` submits at `0x60399008` (`0x60390536`), waits at `0x6039903d`
+  (`0x60390293` → `0x603901f3`) and releases records at `0x60399048` / `0x60399053` before returning success.
+  The standalone emulator fixture stubs the submit and wait services. `0x6039923c` also calls the body at
+  `0x60398ee6` directly, outside the work-list immediate examined in 4a.
+- **Work list (4a) [E].** `tools/omdem1mk2_emu_work_list.py` starts at the real capture entry `0x6041ec04`, follows
+  the params fill `0x6041dda4` and lets constructor `0x6038f173` choose the builder. The request and capture input,
+  heap allocations and logger are fixtures. The ordinary and Soft Focus-only cases reach publication at request+36.
+
+  | Capture fixture | Work-list result |
+  | --- | --- |
+  | Vivid, Natural and Color Creator, kind `0x1000` / `0x1001`, class 0 | Stock flags `0` and `v0.4c18t` flags `0x80` both use builder `0x603a63f4` and publish identical lists: `0x603a5d7d`, `0x603a5d96`, `0x603a5df6`, `0x60391a9b`. |
+  | Art Filter 101, Art Effect 0 | Flags `0x80`, builder `0x60392e0d`. After reduce `0x60398e6f`, the list has `0x6039905e` and `0x60391a9b`. Blend Setup remains pending in `a2` when the builder returns. |
+  | Art Filter 101, Art Effect 2 | Flags `0x480`. At `0x60393b9c` the `0x400` branch writes the pending `0x60398ee1` into slot 3 (zero-based), at **job+11020**. The fixture stops after finalizing the primary list, before the secondary setup. |
+
+  The list starts at job+10984 and each item is 12 B. The primary entry at item+0 is called by `0x6038fb5f`
+  with `a0 = job`. The runner reached both the original entry and a redirected address after changing just the
+  immediate at `0x60393a6b` in emulator memory. The callback dispatch at `0x60392765` uses item+4.
+  The planned immediate edit is specific to the tested Art route. **4a still needs a route for ordinary colour
+  stills** before `hl_gs` can be validated on those jobs.
 - **Pass [E]:** `patches/omdem1mk2/halation/hl_pass.s` = the E-P7 h1/h2 passes A/B/C instruction for instruction, with the
   E-M1 bus guard (0xa0000000..0xafffffff direct; 0x84000000..0x9fffffff and 0xb0000000 up windowed; below 0x84000000
   refused), per-piece window open (lock, mode get, mapper, flush or mode restore, unlock) and the E-M1 allocators.
@@ -201,6 +215,3 @@ need confirmation before deciding whether to change the timeout.
   request − 11329). `tools/omdem1mk2_emu_job_marker.py`: constructor and work-list builder give identical results with
   the byte 0 or 0xA5 except job+35 itself. Report: `plans/reports/research-261123-0838-em1ii-halation-job-marker.md`.
   Still to prove: the blend setup, combiners and destructor with the marker set, and the other three constructor paths.
-- **Work list [E, open]:** items are 12 bytes; a synthetic job with only flag 0x80 gets dev / reduce `0x60398e6f` /
-  `0x6039905e` but the builder keeps the blend setup pointer pending in a2 and returns before storing it. A realistic job
-  (filled by `0x6041dda4` and the request) is needed to show where `0x60398ee1` lands before the wrapper route is final.

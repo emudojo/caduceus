@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""E-M1 Mark II halation step 3: Soft Focus route for ordinary colour stills (docs/OMD-EM1-II/HALATION.md).
+"""Build the E-M1 Mark II Soft Focus flag gate (docs/OMD-EM1-II/HALATION.md).
 
     python3 patches/omdem1mk2/halation/build.py               -> edits.json (stage from sid 961)
     EM1_HL_FORCE_STAGE=1 python3 patches/omdem1mk2/halation/build.py   -> test build: stage fixed at 1..3

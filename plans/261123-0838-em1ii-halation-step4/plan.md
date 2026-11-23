@@ -1,12 +1,17 @@
 # E-M1 II halation step 4: tinted halation pass
 
-Status: in progress (2026-11-23). No camera available: every phase is emulator-proven; one camera build at the end.
+In progress (2026-11-23). Verify each phase in the emulator, then make one camera build.
 Design source: E-P7 `patches/halation` (h1–h4) on the grain CPU route, docs/HALATION_RED.md §14–22, docs/GRAIN_PORT.md;
 E-M1 II sites and harnesses: docs/OMD-EM1-II/HALATION.md (steps 2–3).
 
-Route (as the E-P7 `gc_gs`): repoint the work-list word that pushes the Soft Focus blend setup (`mov imm32` operand at
-`0x60393a6b` → `0x60398ee1`) to our wrapper. The wrapper runs the stock blend setup; if that returns with the blended
-image in buffer 0x1000, it runs the halation pass on it, before the output pass. Data edit only on the stock side.
+`tools/omdem1mk2_emu_work_list.py` ran the firmware's capture entry, params
+fill and constructor. With Art Filter 101 and flags `0x480`, the immediate at `0x60393a6b` supplies slot 3 (zero-based,
+job+11020) and the stock runner dispatches it. With flags `0x80` alone the Art builder leaves Blend Setup pending.
+Vivid, Natural and Color Creator class-0 jobs with stage 2 set `0x80`, take a different builder (`0x603a63f4`) and
+publish the same four entries as stock. See [capture-job results in step 4](../../docs/OMD-EM1-II/HALATION.md).
+
+4a remains open. Establish a route for ordinary colour stills with a verified image completion point, then run
+`hl_gs` with Halo off and on. The Art work-list immediate by itself cannot route the tested colour stills.
 
 | Phase | Done when |
 |---|---|

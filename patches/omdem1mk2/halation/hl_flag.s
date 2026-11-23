@@ -1,4 +1,4 @@
-/* E-M1 Mark II halation step 3: Soft Focus route for ordinary colour stills (docs/OMD-EM1-II/HALATION.md).
+/* E-M1 Mark II halation step 3: Soft Focus flag gate for ordinary colour stills (docs/OMD-EM1-II/HALATION.md).
  *
  * Hooked at the entry of the Art Effect -> job-flag converter 0x6042285e (jmp + nop over its first 7 bytes).
  * There a0 = source request (+194 capture kind, +28 -> capture record) and a1 = the job-flag word. The caller's
@@ -8,8 +8,8 @@
  * the shot has no Art Effect (capture+24951 == 0, so the stock Soft Focus effect keeps its own route), the picture
  * mode (capture+24203, pipeline enum) is a colour mode: < 100 (no Art Filter) and not 5 (Monotone) or 12 (MONO),
  * as the stock mono test 0x60342c32; and the capture kind is not one the E-P7 skips (0x2001, 0x2006, 0x1008,
- * 0x1006). Then flag 0x80 is ORed in; the converter's art-0 path keeps it, and the work-list builder pushes the
- * Soft Focus blend for it (emulated: tools/omdem1mk2_emu_blend_setup.py). Otherwise the flag word is untouched.
+ * 0x1006). The converter's art-0 path preserves the added flag 0x80. The tested colour-still builder needs a
+ * separate blend route (tools/omdem1mk2_emu_work_list.py). When the gate is closed, stock conversion proceeds.
  *
  * Built with FORCE_STAGE = 1..3 (as --defsym, test builds only) the stage is that constant instead of sid 961.
  */

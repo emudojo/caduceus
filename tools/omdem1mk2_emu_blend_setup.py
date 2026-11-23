@@ -3,13 +3,14 @@
 
     python3 tools/omdem1mk2_emu_blend_setup.py [releases/em1mk2/<VERSION>/edits.json]
 
-The work-list builder pushes 0x60398ee1 when job flag 0x80 is set (docs/OMD-EM1-II/HALATION.md "Step 2"). It finds the
-buffer records 0x1000 (image) and 0x1061 in the job (job+6592, 88-byte records, id at +76; bufidx 0x6038c01c), inits
-the request embedded at job+11364 (0x60390dbe), sets stage 0xf005 at request+12 and effect 0x0402 at request+656,
+This fixture calls Blend Setup directly. See omdem1mk2_emu_work_list.py for the Art work-list dispatch conditions.
+Blend Setup looks up records 0x1000 (image) and 0x1061 through bufidx 0x6038c01c. The records start at job+6592,
+are 88 bytes each, and have their ID at +76. It initializes the embedded request at job+11364 via 0x60390dbe,
+sets stage 0xf005 at request+12 and effect 0x0402 at request+656,
 copies the two records (16 words each) to request+20 / +84, describes an output buffer at request+340 and queues it.
 Checks, on the fabricated job:
   1. it returns 0; request = job+11364; stage / effect / both record copies / the output descriptor are as above;
-  2. the selector 0x603f1653 maps the request it built to combiner 11 (the chain flag 0x80 -> blend -> combiner 11);
+  2. the selector 0x603f1653 maps the request it built to combiner 11;
   3. at the blend-setup hook site 0x60398f5f (E-P7 halation probe site, same 6 bytes) a2 = request, a3 = record 0x1000;
   4. without record 0x1061 it returns 48 and leaves the request untouched.
 Boot-ROM memcpy / memset as in the other harnesses. Fixture boundaries (frame-correct stubs): output allocation 0x6038bc07 (returns record index 7), queue submit
