@@ -230,3 +230,13 @@ need confirmation before deciding whether to change the timeout.
   instruction hooks (main-entry flag `0x60421bbd`, the 4:3 aspect test in `0x603a573d`, the 4:3 append test `0x60390102`),
   careful handling of the second (thumbnail) encode, and costs one extra full-size buffer (~40 MB) per marked shot. The
   review image would show no halation. Alternative not yet tried: route marked jobs through the Art builder `0x60392e0d`.
+- **Art route for colour stills [E]** (`tools/omdem1mk2_emu_art_route.py`; report
+  `plans/reports/research-261123-1709-em1ii-art-route.md`): repointing the colour-builder call at `0x603900ec`
+  (`dd 84 3b 01 00 00 04`, a0 = job, frame `[],4` like the Art call `0x60391c1c`) for marked jobs gives the
+  Soft-Focus-only Art list `0x60392df2, 0x6039276e, 0x60398e6f, 0x6039905e, 0x60391a9b`. The development then writes a
+  full-size record 0x1000 (0x0302, 5184×3888) and waits for it; `0x60398e6f` blurs into 0x1061; `0x6039905e` blends
+  0x1000 + 0x1061 (combiner 11) into record 3 and encodes the main JPEG. The development request equals the plain one in
+  every colour field (key, picture mode, profile, sectors, 617/618, tone, NR, sharpness, aspect) **except** the outputs and
+  `req+1838` = 0x0400 (written at `0x6039272f`), which runs combiner 13 `0x603dd101` inside development with fixed
+  constants. Whether that changes pixels needs a camera A/B. Plan: pass on 0x1000 in a wrapper behind the immediate at
+  `0x60393a54` (`mov 0x60398e6f,d1`) + neutral combiner 11 for marked jobs. Cost ≈ a stock Soft Focus shot (≈121 MB live).
