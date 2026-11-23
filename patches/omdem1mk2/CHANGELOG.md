@@ -5,6 +5,14 @@ Container update package: `E1259999.BIN` (93,050,944 bytes) installed via `DCOLY
 
 ---
 
+## v0.4c19t — 2026-11-23 (Sharpness scale camera-test build; emulator-checked, not camera-tested)
+
+- Sharpness becomes a linear scale: −2 off, −1 25 %, 0 50 %, +1 75 %, +2 100 % (= stock +2). Flat and Log stay stock.
+  Menus and EXIF still show −2..+2.
+- v0.4c17 otherwise (no halation). To go back, flash v0.4c17 or the stock restore file.
+- Emulator: the sharpening-gain helper on stock and patched images (3,780 runs, `tools/omdem1mk2_emu_sharp_scale.py`),
+  plus every v0.4c17 check. See `docs/PORT_EM1MK2.md` §5 for what was and wasn't emulated, and the camera checks.
+
 ## v0.4c18t — 2026-11-20 (halation step 3 camera-test build; emulator-checked, not camera-tested)
 
 - **Test build, not for everyday use.** Ordinary colour stills (any colour picture mode, not Monotone, not an Art
