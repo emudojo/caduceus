@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Run the halation step 4 route (patches/omdem1mk2/halation: hl_flag + hl_route + hl_pass) end to end in the emulator.
 
-    python3 tools/omdem1mk2_emu_halation_route.py
+    python3 tools/omdem1mk2_emu_halation_route.py [SPEC] [--no-pass]
+
+SPEC: a release edits.json that holds the stage-2 halation edits (default: v0.4c17 + those edits built here);
+--no-pass: the EM1_HL_NO_PASS build, where hl_ob goes straight to the stock blur (B then checks that instead).
 
 The patch is built with the stage fixed at 2 (as a test build would be) and applied on top of v0.4c17; jobs come from
 the real capture entry 0x6041ec04 with the fixtures of tools/omdem1mk2_emu_work_list.py / _plain_route.py.
@@ -15,6 +18,7 @@ the real capture entry 0x6041ec04 with the fixtures of tools/omdem1mk2_emu_work_
 hl_pass itself is checked against its model by tools/omdem1mk2_emu_halation_pass.py; the ISP and the camera's colour
 result (combiner 13 during the Art development, docs/OMD-EM1-II/HALATION.md) are not emulated.
 """
+import argparse
 import importlib.util
 import json
 import struct
@@ -40,9 +44,14 @@ def load_build():
     return mod
 
 
-def spec_files():
-    """(patched spec path, symbols): v0.4c17 + the halation edits with the stage fixed at 2."""
-    hl, syms, _ = load_build().make_edits(STAGE, 0)
+def spec_files(spec=None, no_pass=0):
+    """(patched spec path, symbols): SPEC, or v0.4c17 + the halation edits with the stage fixed at 2."""
+    hl, syms, _ = load_build().make_edits(STAGE, no_pass)
+    if spec:
+        have = json.load(open(spec))['edits']
+        missing = [e['addr'] for e in hl['edits'] if e not in have]
+        assert not missing, f'{spec} lacks these stage-2 halation edits (no_pass={no_pass}): {missing}'
+        return spec, syms
     base = json.load(open(BASE_SPEC))
     base['edits'] = hl['edits'] + base['edits']
     f = tempfile.NamedTemporaryFile('w', suffix='.json', delete=False)
@@ -86,6 +95,13 @@ def check_route(stock, patched, syms):
     print(f'A route: Vivid / Natural / Color Creator -> marker {MARK:#x}, Art list with hl_ob for the blur; '
           'Monotone byte for byte stock')
     return marked[1]
+
+
+def check_ob_no_pass(stock, patched, syms, mark):
+    image, reference = P.patched(patched), P.patched(stock)
+    dev_job = P.run(reference, P.make_job(mark['job'], 1), A.ART_DEV, 1, mark)[0]
+    assert P.run(image, dev_job, syms['hl_ob'], 2, mark) == P.run(reference, dev_job, A.REDUCE, 2, mark)
+    print('B hl_ob (no-pass build): marked job -> the stock blur with identical submits, waits and job')
 
 
 def check_ob(stock, patched, syms, mark):
@@ -152,10 +168,14 @@ def check_combiners(stock, patched, syms):
 
 
 def main():
-    path, syms = spec_files()
+    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p.add_argument('spec', nargs='?')
+    p.add_argument('--no-pass', action='store_true')
+    a = p.parse_args()
+    path, syms = spec_files(a.spec, int(a.no_pass))
     stock, patched = W.image(BASE_SPEC), W.image(path)
     mark = check_route(stock, patched, syms)
-    check_ob(stock, patched, syms, mark)
+    (check_ob_no_pass if a.no_pass else check_ob)(stock, patched, syms, mark)
     check_combiners(V.image(BASE_SPEC), V.image(path), syms)
     print('RESULT PASS')
 

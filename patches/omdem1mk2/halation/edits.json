@@ -51,6 +51,20 @@
    "expect": "b8d03d60",
    "new": "6c712e61",
    "why": "halation: combiner 12 -> hl_c12 (neutral blend for marked jobs)"
+  },
+  {
+   "kind": "0x100",
+   "addr": "0x600792c4",
+   "expect": "800a",
+   "new": "801e",
+   "why": "halation: watchdog timeout 10 -> 30 s (SYS_WDT on)"
+  },
+  {
+   "kind": "0x100",
+   "addr": "0x6005aecc",
+   "expect": "800a",
+   "new": "801e",
+   "why": "halation: watchdog timeout 10 -> 30 s (restore after a flash operation)"
   }
  ]
 }

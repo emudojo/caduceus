@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Run the Color Creator Halo page (color_creator_wheel built with EM1_CC_HALO=1) in the MN103 emulator.
 
-    python3 tools/omdem1mk2_emu_halo_page.py
+    python3 tools/omdem1mk2_emu_halo_page.py [SPEC]
+
+SPEC: a release edits.json that holds the Halo page (default: built here as below).
 
 The release spec is v0.4c17 with the wheel edits replaced by patches/omdem1mk2/color_creator_wheel/edits_halo.json and the
 halation edits added (they make Section 6 load the 100 KB gap where the page code lives at 0x612f0000). The editor runs
@@ -14,6 +16,7 @@ model) and card driver are fixtures. Checks:
 """
 import json
 import struct
+import sys
 import tempfile
 
 import omdem1mk2_emu_color_creator as CC
@@ -60,7 +63,7 @@ class Editor(CC.Editor):
 def main():
     fixtures = (*SD.stubs(), *SD.assemble_fixture(SD.ROOT / 'tools/emu_fixtures/em1_color_creator_stubs.s', CC.UI,
                                                    MODEL=CC.MODEL))
-    ed = Editor(V.image(spec_path()), fixtures)
+    ed = Editor(V.image(sys.argv[1] if len(sys.argv) > 1 else spec_path()), fixtures)
     ed.call(CC.CREATE)
     look = ed.call(CC.GUIDE)
     assert look.startswith('Provia'), look

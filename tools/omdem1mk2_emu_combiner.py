@@ -13,6 +13,9 @@ Checks:
      repointed to the prototype stubs in tools/emu_fixtures/em1_combiner_neutral.s, gate off gives the stock bank byte
      for byte, gate on gives w = 1024 (11: A = 1024, B = 0; 12: A = 0, B = 1024) and every other bank byte unchanged;
   3. other effects (0x0200 -> 9, 0x0300 -> 10) are untouched by the repointed words.
+A release with the halation patch already has the table words on hl_c11 / hl_c12: the zeroed bytes below the request
+(the job; its marker job+35 = request - 11329 is 0) make it an unmarked job, which must give the stock banks in 1; the
+prototype stubs of 2 / 3 then do not apply, and marked jobs are checked by tools/omdem1mk2_emu_halation_route.py (C).
 """
 import argparse
 import struct
@@ -47,6 +50,7 @@ def dispatch(img, effect, stub_code=None, gate=0, entry=DISPATCH, mask=0xF0, fra
     code = b'\xdd' + struct.pack('<i', entry - CALLER) + bytes([mask, frame]) + b'\xcb'
     regions = [Region('caller', CALLER, code, 'rx'), *V.main_regions(img), Region('stack', STACK, bytes(0x1000), 'rw'),
                Region('ctx', CTX, bytes(ctx), 'r'), Region('request', REQUEST, bytes(request), 'r'),
+               Region('job', REQUEST - 0x3000, bytes(0x3000), 'r'),
                Region('bank', BASE, bytes(0x2000), 'rw', capture=True), Region('gate', GATE, struct.pack('<I', gate), 'r')]
     if stub_code:
         regions.append(Region('stubs', STUBS, stub_code, 'rx'))
@@ -88,6 +92,9 @@ def main():
             assert weights(bank) == STOCK_WEIGHTS[effect], (label, effect, [hex(w) for w in weights(bank)])
             stock_banks[effect] = bank
         print(f'{label}: effect 0x402 -> combiner 11 (600/424), 0x403 -> combiner 12 (424/600)')
+        if any(struct.unpack_from('<I', img, TABLE_WORD[c] - V.B)[0] != STOCK_HANDLER[c] for c in (11, 12)):
+            print(f'{label}: table words on the halation hooks; unmarked job = stock banks (marked: emu_halation_route C)')
+            continue
 
         code, syms = SD.assemble_fixture(SD.ROOT / 'tools/emu_fixtures/em1_combiner_neutral.s', STUBS, GATE=GATE,
                                          BANK_INIT=0x603DCA05, C11=STOCK_HANDLER[11], C12=STOCK_HANDLER[12],

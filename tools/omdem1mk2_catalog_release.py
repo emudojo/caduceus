@@ -2,6 +2,7 @@
 """Validate and seal the E-M1 II port for OM's catalog firmware."""
 
 import argparse
+import importlib.util
 import json
 from pathlib import Path
 import subprocess
@@ -23,6 +24,15 @@ HALATION_TEST_VERSION = 'v0.4c18t'      # v0.4c17 + halation step 3 with a fixed
 HALATION_EDITS = ROOT / 'patches/omdem1mk2/halation/edits.json'
 SHARP_TEST_VERSION = 'v0.4c19t'       # v0.4c17 + Sharpness linear scale (camera test only)
 SHARP_EDITS = ROOT / 'patches/omdem1mk2/sharp_scale/edits.json'
+# Halation step 4 camera tests: v0.4c17 + the Color Creator Halo page + halation with the stage fixed at Med (2) and the
+# watchdog timeout at 30 s. Value: EM1_HL_NO_PASS (1 = Art route + neutral blend only, the combiner 13 A/B).
+HALO_DIAG_VERSION = 'v0.4c20t'
+HALO_GLOW_VERSION = 'v0.4c21t'
+HALO_TESTS = {HALO_DIAG_VERSION: 1, HALO_GLOW_VERSION: 0}
+HALO_STAGE = 2
+WHEEL_EDITS = ROOT / 'patches/omdem1mk2/color_creator_wheel/edits.json'
+HALO_WHEEL_EDITS = ROOT / 'patches/omdem1mk2/color_creator_wheel/edits_halo.json'
+HALO_PAGE_ADDR = '0x612f0000'             # the Halo page section, in the gap the halation edits make Section 6 load
 CAMERA = 'em1mk2'
 CATALOG_SECTION_END = 0x60257000
 ASPECT_SECTION_END = 0x60257800
@@ -69,8 +79,7 @@ def catalog_spec(legacy, main):
     }
 
 
-def replace_color_creator_edits(spec):
-    wheel = ROOT / 'patches/omdem1mk2/color_creator_wheel/edits.json'
+def replace_color_creator_edits(spec, wheel=WHEEL_EDITS, new_addrs=()):
     edits = json.loads(wheel.read_text(encoding='utf-8'))['edits']
     replacements = {(edit['kind'], edit['addr']): edit for edit in edits}
     if len(replacements) != len(edits):
@@ -81,8 +90,10 @@ def replace_color_creator_edits(spec):
         if patch and not patch['expect'].startswith(edit['expect']):
             raise ValueError(f"Color Creator stock bytes changed at {edit['addr']}")
         merged.append(patch or edit)
-    if replacements:
+    added = [replacements.pop(('0x100', addr)) for addr in new_addrs if ('0x100', addr) in replacements]
+    if replacements or len(added) != len(new_addrs):
         raise ValueError('Color Creator changes must replace existing edits')
+    merged += added
     if merged == spec['edits']:
         raise ValueError('Rebuild the Color Creator edits before sealing this release')
     return {**spec, 'version': COLOR_CREATOR_VERSION, 'edits': merged}
@@ -93,6 +104,16 @@ def halation_test_spec(spec):
     if patch.get('force_stage') not in (1, 2, 3):
         raise ValueError('Build the halation test edits with EM1_HL_FORCE_STAGE=1..3 before sealing ' + HALATION_TEST_VERSION)
     return {**spec, 'version': HALATION_TEST_VERSION, 'halation_force_stage': patch['force_stage'],
+            'edits': [*patch['edits'], *spec['edits']]}
+
+
+def halo_test_spec(spec, version):
+    """The halation edits built here (stage fixed at HALO_STAGE) in front of a v0.4c17 spec with the Halo wheel."""
+    loader = importlib.util.spec_from_file_location('hl_build', ROOT / 'patches/omdem1mk2/halation/build.py')
+    build = importlib.util.module_from_spec(loader)
+    loader.loader.exec_module(build)
+    patch, _, _ = build.make_edits(HALO_STAGE, HALO_TESTS[version])
+    return {**spec, 'version': version, 'halation_force_stage': HALO_STAGE, 'halation_no_pass': HALO_TESTS[version],
             'edits': [*patch['edits'], *spec['edits']]}
 
 
@@ -129,13 +150,20 @@ def validate(spec_path, version):
     for tool in ('emu_aspect', 'emu_fixed_patches', 'emu_sdload', 'emu_af', 'emu_artflags', 'emu_capture_kind', 'emu_combiner',
                  'emu_blend_setup', 'emu_mapper'):
         run(tool, spec_path)
-    if version in (COLOR_CREATOR_VERSION, HALATION_TEST_VERSION, SHARP_TEST_VERSION):
+    if version in (COLOR_CREATOR_VERSION, HALATION_TEST_VERSION, SHARP_TEST_VERSION, *HALO_TESTS):
         run('emu_color_creator', spec_path)
     if version == SHARP_TEST_VERSION:
         run('emu_sharp_scale', spec_path)
     if version == HALATION_TEST_VERSION:
         stage = json.loads(Path(spec_path).read_text(encoding='utf-8'))['halation_force_stage']
         run('emu_halation_flag', spec_path, '--force-stage', stage)
+    if version in HALO_TESTS:
+        run('emu_halation_flag', spec_path, '--force-stage', HALO_STAGE)
+        run('emu_halation_route', spec_path, *(['--no-pass'] if HALO_TESTS[version] else []))
+        run('emu_halo_page', spec_path)
+        run('emu_watchdog', spec_path)
+        if not HALO_TESTS[version]:
+            run('emu_halation_pass')
     # Both releases preserve the camera-tested v0.4c15 aspect assets byte for byte.
     run('emu_scp', spec_path, '--reference', ROOT / 'releases' / CAMERA / BASE_RELEASE / 'edits.json')
     return sorted(set(checked))
@@ -153,6 +181,8 @@ def seal(stock_path, version):
     spec = catalog_spec(legacy, main)
     if version in (COLOR_CREATOR_VERSION, HALATION_TEST_VERSION, SHARP_TEST_VERSION):
         spec = replace_color_creator_edits(spec)
+    if version in HALO_TESTS:
+        spec = halo_test_spec(replace_color_creator_edits(spec, HALO_WHEEL_EDITS, (HALO_PAGE_ADDR,)), version)
     if version == HALATION_TEST_VERSION:
         spec = halation_test_spec(spec)
     if version == SHARP_TEST_VERSION:
@@ -199,7 +229,8 @@ def seal(stock_path, version):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--stock', type=Path, required=True)
-    parser.add_argument('--version', choices=(VERSION, COLOR_CREATOR_VERSION, HALATION_TEST_VERSION, SHARP_TEST_VERSION), default=VERSION)
+    parser.add_argument('--version', choices=(VERSION, COLOR_CREATOR_VERSION, HALATION_TEST_VERSION, SHARP_TEST_VERSION,
+                                                 *HALO_TESTS), default=VERSION)
     args = parser.parse_args()
     try:
         seal(args.stock, args.version)

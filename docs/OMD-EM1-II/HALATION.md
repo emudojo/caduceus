@@ -36,7 +36,7 @@ brightness, gradual daylight fade; credit in NOTICE).
 |---|---|
 | Soft Focus route (bloom: flag hook, blend setup, combiner 11, callback) | callback `0x60391959`, blend setup `0x60398f5f`, effect selector `0x603f1653` exact; flag hook ≈ `0x604228fc`, Soft Focus entry ≈ `0x6039517c` / `0x60398ee1` (prefix match); combiner 11/12 calls not found by bytes |
 | CPU pass route (grain_cpu r2: work-list hook, window / mapper, lock / unlock) | not found by bytes; needs code-shape search |
-| Watchdog 10 s → 30 s (E-P7 v0.31b) | E-M1 II stock write path confirmed up to the hardware handshake. See below. |
+| Watchdog 10 s → 30 s (E-P7 v0.31b) | **Done [E]:** both run-time settings `0x600792c4` / `0x6005aecc` → 30 s (halation patch). See below. |
 | Spare remembered setting for the stage | **sid 961** (key `0xF709[0]`), see "Stage setting" below; power-off survival needs one camera test |
 | Code space ~1.8 KB + tables; one malloc ≤ 16 KB per shot | 100 KB of loaded gap confirmed on camera with sp1. The actual halation allocation and code placement still need verification. |
 | Camera control | a Halo row/page in the look editor (`color_creator_wheel`) |
@@ -171,6 +171,23 @@ then wrote `0x20041001` to `0x98e000a4`. The run stopped before the hardware ack
 `0x60022728`. The startup path, timer units on camera, and time consumed by an E-M1 II image pass still
 need confirmation before deciding whether to change the timeout.
 
+**Decision (4g, 2026-11-23): raise the limit to 30 s, keep the 1/3 coverage cap [E].** The E-M1 II has the same two
+run-time settings as the E-P7 (v0.31b changed both):
+- `0x600792bc` SYS_WDT on: stores 1 at `0x62095e4a`, `mov 10,d0` at **`0x600792c4`**, setter wrapper `0x60079282`
+  (`exthu d0` → `0x600226fd`). SYS_WDT's task (`0x60079311`) calls it at start (`0x60079303`), then kicks
+  (`0x600792dd`) and waits ≤ 3000 ms on its mailbox (`0x600513e9`) in a loop, like E-P7 `0x6005b287`.
+- the flash-operation path: off (`clr d0` at `0x6005aeb0` / `0x6005ae8c`), the operation, then `mov 10,d0` at
+  **`0x6005aecc`** (E-P7 `0x6005bcff`).
+- left stock: the 1 / 0 settings (`0x60059a4a`, `0x6006ed47`, `0x6057adc4`, the other `0x60079282` callers) and the 10
+  before the `bra .` at `0x600cdfb5` (a deliberate hang that the watchdog must end).
+
+The setter writes the 6-bit seconds field (max 63), so 30 is inside the range. Lowering the cap was rejected: on a
+night scene it would drop the glow on exactly the frames halation is for, and the E-P7 restarts were fixed by the
+limit, not by a cap. Worst case with the cap kept: ≈ 25 instr/px ≈ 5–8 s for the pass, + the Soft Focus development
+and ≤ 3 s since the last kick, under 30 s. `tools/omdem1mk2_emu_watchdog.py` runs both settings stock / patched: the
+field becomes 10 / 30 with the register's upper bits kept and the handshake written; only those two bytes differ in the
+SYS code. Cost: a real hang restarts after up to 30 s instead of 10 s.
+
 ## Order
 
 1. Code space: confirmed with the sp1 loaded-end probe above.
@@ -267,4 +284,14 @@ need confirmation before deciding whether to change the timeout.
   the write pass is skipped (≈ 1 instr/px). Windowed access adds 1–2 %. At the E-P7's measured 0.2–0.33 s per instr/px
   for a full frame that is ≈ 0.2–0.3 s without lights and **≈ 4–7 s** for a night scene with lights (more near the cap),
   on top of the Soft Focus passes — close to the stock 10 s watchdog (`0x6005aecc` passes 10). The E-P7 restarted on
-  bright frames until v0.31b raised its timeout to 30 s. Decision pending: raise the timeout, lower the cap, or both.
+  bright frames until v0.31b raised its timeout to 30 s. **Decided:** limit 30 s, cap kept (see "Stock watchdog write
+  path" above).
+- **Camera test builds (4h) [E]** (`tools/omdem1mk2_catalog_release.py`; v0.4c17 + `edits_halo.json` + halation, stage
+  fixed at 2, watchdog 30 s):
+  - **`v0.4c20t`** diagnostic (`EM1_HL_NO_PASS=1`): Art route + neutral blend, no pass. Same scene as v0.4c17 → the
+    JPEGs must match; a difference is combiner 13 (`req+1838`) in the Art development.
+  - **`v0.4c21t`** glow: the full pass. Night scene with point lights in Vivid / Natural / Color Creator: tinted glow
+    around the lights; Monotone, an Art Filter, burst and RAW+JPEG stay stock; note the save time and any restart.
+  - Sealing runs every v0.4c17 check plus `emu_halation_flag --force-stage 2`, `emu_halation_route` (with `--no-pass`
+    for c20t), `emu_halo_page`, `emu_watchdog` and, for c21t, `emu_halation_pass`, all on the sealed spec. The Halo page
+    stores sid 961 but the stage stays 2 in both builds.

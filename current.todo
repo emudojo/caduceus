@@ -183,6 +183,8 @@ wheel's vividness also stays 0, that is a separate symptom.
   0x603a5d96, 0x603a5df6, 0x60391a9b) to run hl_pass; the Art route (slot 3 = 0x60398ee1) is confirmed for Art Filters.
 * Step 4: per-job mark + combiner 11/12 stubs (strength, neutral blend), halation pass on the CPU (mapper map above),
   look tint, Halo row in color_creator_wheel writing sid 961; each emulated first.
+  2026-11-23: all built and emulated; watchdog 30 s; test builds v0.4c20t (no-pass diagnostic: JPEG must match
+  v0.4c17) and v0.4c21t (glow, stage fixed at Med) sealed. NEXT: camera test of both, then the stage from sid 961.
 * Code goes in the 100 KB region; the 162 KB gap 0x60bc8800..0x60bf1000 can be probed the same way if needed.
 
 ### Priority 3: aspect, still untested on camera

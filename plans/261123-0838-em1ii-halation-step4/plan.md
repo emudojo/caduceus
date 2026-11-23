@@ -27,3 +27,8 @@ publish the same four entries as stock. See [capture-job results in step 4](../.
 Update 2026-11-23 evening: Art route chosen (owner). 4a/4b/4c/4d built and emulated end to end
 (tools/omdem1mk2_emu_halation_route.py, _halation_pass.py, _halation_flag.py, _job_marker.py). Next: 4e tint, 4f control,
 4g time budget, then a no-pass diagnostic build (combiner 13 A/B) and a glow test build.
+
+Update 2026-11-23 night: 4e/4f/4g/4h done in the emulator. 4g: watchdog 10 -> 30 s at both run-time settings
+(`0x600792c4`, `0x6005aecc`; tools/omdem1mk2_emu_watchdog.py), 1/3 coverage cap kept. 4h: sealed `v0.4c20t`
+(no-pass diagnostic) and `v0.4c21t` (glow), stage fixed at 2, with every check. Remaining: camera tests
+(docs/OMD-EM1-II/HALATION.md "Camera test builds"), then a release that takes the stage from the Halo page.

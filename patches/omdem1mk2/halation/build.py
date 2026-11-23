@@ -10,6 +10,10 @@ Edits:
   2. hl_flag.s at 0x612e7000 (the gap, 0xFF in the catalog stock).
   3. Hook: the first 7 bytes of the flag converter 0x6042285e (`mov (28,a0),a3; mov a1,a2; mov 24951,a1`, all
      absolute, no branch lands inside) -> `jmp hl_entry; nop; nop`; hl_flag replays them and returns to 0x60422865.
+  4. Hardware watchdog timeout 10 s -> 30 s at its two run-time settings (as E-P7 v0.31b): `mov 10,d0` at 0x600792c4
+     (SYS_WDT on, before the setter wrapper 0x60079282) and at 0x6005aecc (restore after a flash operation, before the
+     setter 0x600226fd). The setter writes the 6-bit seconds field of 0x98e0008c (max 63). The deliberate settings
+     (0 / 1, and the 10 before the `bra .` at 0x600cdfb5) stay stock.
 """
 import json
 import os
@@ -31,6 +35,7 @@ GETTER, STAGE_KEY = 0x6005E6CF, 0xF709
 ROUTE_CALL, ROUTE_STOCK = 0x603900EC, bytes.fromhex('dd843b01000004')       # call 0x603a3c70,[],4 (a0 = job)
 BLUR_WORD, BLUR = 0x60393A54, 0x60398E6F                                     # mov 0x60398e6f,d1 at 0x60393a52
 C11_WORD, C11, C12_WORD, C12 = 0x6053E164, 0x603DD06F, 0x6053E16C, 0x603DD0B8
+WDT_SITES, WDT_STOCK, WDT_SECONDS = (0x600792C4, 0x6005AECC), bytes.fromhex('800a'), 30   # mov 10,d0 -> mov 30,d0
 SYMS = dict(GETTER=GETTER, STAGE_KEY=STAGE_KEY, BACK=BACK, PLAIN_BUILDER=0x603A3C70, ART_BUILDER=0x60391C1C,
             BUFIDX=0x6038C01C, BLUR=BLUR, C11=C11, C12=C12, TAIL=0x603DD518, BANK_INIT=0x603DCA05,
             LOCK=0x6006E9D0, UNLOCK=0x6006EA19, FLUSH=0x60068709, MAPPER=0x6006888F, MODEGET=0x60068B78,
@@ -76,6 +81,8 @@ def make_edits(force, no_pass):
     for addr, stock in ((ROUTE_CALL, ROUTE_STOCK), (BLUR_WORD, struct.pack('<I', BLUR)),
                         (C11_WORD, struct.pack('<I', C11)), (C12_WORD, struct.pack('<I', C12))):
         assert d[addr - B:addr - B + len(stock)] == stock, f'stock bytes changed at {addr:#x}'
+    for addr in WDT_SITES:
+        assert d[addr - B:addr - B + 2] == WDT_STOCK, f'watchdog site changed at {addr:#x}'
     code, syms = assemble(force, no_pass)
     assert d[CODE_AT - B:CODE_AT + len(code) - B] == b'\xff' * len(code), 'code area not 0xFF'
     assert CODE_AT + len(code) <= NEW_END
@@ -95,7 +102,8 @@ def make_edits(force, no_pass):
         word(BLUR_WORD, syms['hl_ob'], 'halation: Soft Focus blur work-list word -> hl_ob (pass on record 0x1000)'),
         word(C11_WORD, syms['hl_c11'], 'halation: combiner 11 -> hl_c11 (neutral blend for marked jobs)'),
         word(C12_WORD, syms['hl_c12'], 'halation: combiner 12 -> hl_c12 (neutral blend for marked jobs)'),
-    ]
+    ] + [e(a, WDT_STOCK, bytes([0x80, WDT_SECONDS]), f'halation: watchdog timeout 10 -> {WDT_SECONDS} s '
+           f'({"SYS_WDT on" if a == WDT_SITES[0] else "restore after a flash operation"})') for a in WDT_SITES]
     spec = {'patch': 'halation', 'force_stage': force, 'no_pass': no_pass, 'edits': edits}
     return spec, syms, len(code)
 

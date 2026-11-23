@@ -5,6 +5,30 @@ Container update package: `E1259999.BIN` (93,050,944 bytes) installed via `DCOLY
 
 ---
 
+## v0.4c21t — 2026-11-23 (halation glow camera-test build; emulator-checked, not camera-tested)
+
+- **First build that should show halation.** Vivid / Natural / Color Creator stills get a tinted glow around bright
+  highlights, at Med strength (stage fixed at 2 in this test build). The colour comes from the active look (red for
+  every built-in look; card looks may choose amber, warm or cool). Monotone, Art Filters, Art Effects, the four
+  excluded capture kinds (burst, RAW+JPEG and movie paths) stay stock.
+- Marked stills develop through the Soft Focus Art route with a neutral blend, so they take about as long as a Soft
+  Focus Art Filter shot plus the glow pass (estimated 0.2–0.3 s without lights, about 4–8 s on a night scene).
+- The hardware watchdog limit is raised from 10 s to 30 s (both run-time settings), as on E-P7 v0.31b, so a long save
+  can't restart the camera. A real hang now restarts after up to 30 s instead of 10 s.
+- Color Creator has a fifth page, **Halo Off / Low / Med / High** (INFO steps pages). It stores the setting, but in this
+  build the strength stays at Med whatever it shows; the page is here to test the control.
+- v0.4c17 otherwise. To go back, flash v0.4c17 or the stock restore file.
+- Emulator: route, blend, pass (36 cases bit-exact against the model), tint, Halo page, watchdog and every v0.4c17
+  check. Not emulated: the image processor, the camera's colours, real timing. See `docs/OMD-EM1-II/HALATION.md` step 4.
+
+## v0.4c20t — 2026-11-23 (halation route diagnostic build; emulator-checked, not camera-tested)
+
+- **Diagnostic, no glow.** Same as v0.4c21t without the glow pass: marked colour stills take the Soft Focus Art route
+  with a neutral blend. Shoot the same scene and settings (tripod) with v0.4c17 and with this build: the JPEGs should
+  match. A colour or contrast difference means the Art development (combiner 13) changes pixels, which v0.4c21t then
+  inherits.
+- Watchdog 30 s and the Halo page as in v0.4c21t.
+
 ## v0.4c19t — 2026-11-23 (Sharpness scale camera-test build; emulator-checked, not camera-tested)
 
 - Sharpness becomes a linear scale: −2 off, −1 25 %, 0 50 %, +1 75 %, +2 100 % (= stock +2). Flat and Log stay stock.
