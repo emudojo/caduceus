@@ -53,6 +53,9 @@ hl_entry:
     beq hl_done
     cmp 3,d0
     bhi hl_done               /* SetValue does not range-check: anything above 3 (or negative) is Off */
+    mov d0,d1                 /* job marker: params+31 -> job+35 = 0xA0 | (tint - 1) << 2 | stage (tint red for now) */
+    or 0xa0,d1
+    movbu d1,(19,a2)          /* a2 = params+12 */
     mov (a2),d0
     or 0x80,d0
     mov d0,(a2)

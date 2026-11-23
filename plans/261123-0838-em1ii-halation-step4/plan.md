@@ -23,3 +23,7 @@ publish the same four entries as stock. See [capture-job results in step 4](../.
 | 4f. Control | Halo row in `color_creator_wheel` writing sid 961 (code moved to the 100 KB region) |
 | 4g. Time budget | Pass time estimated against the 10 s watchdog (`0x6005aecc`); decide whether the timeout must change |
 | 4h. Test release | Sealed with every check; camera test list |
+
+Update 2026-11-23 evening: Art route chosen (owner). 4a/4b/4c/4d built and emulated end to end
+(tools/omdem1mk2_emu_halation_route.py, _halation_pass.py, _halation_flag.py, _job_marker.py). Next: 4e tint, 4f control,
+4g time budget, then a no-pass diagnostic build (combiner 13 A/B) and a glow test build.

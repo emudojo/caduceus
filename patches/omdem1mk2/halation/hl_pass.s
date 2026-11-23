@@ -19,8 +19,7 @@
  .am33_2
  .set T_THR, 224
  .text
- .global _start
-_start:
+ .global hl_pass
 
 hl_pass:
  mov a0,(4,sp)

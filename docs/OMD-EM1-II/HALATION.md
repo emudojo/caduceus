@@ -240,3 +240,16 @@ need confirmation before deciding whether to change the timeout.
   `req+1838` = 0x0400 (written at `0x6039272f`), which runs combiner 13 `0x603dd101` inside development with fixed
   constants. Whether that changes pixels needs a camera A/B. Plan: pass on 0x1000 in a wrapper behind the immediate at
   `0x60393a54` (`mov 0x60398e6f,d1`) + neutral combiner 11 for marked jobs. Cost ≈ a stock Soft Focus shot (≈121 MB live).
+- **Step 4 route built [E]** (`patches/omdem1mk2/halation`: `hl_flag.s` + `hl_route.s` + `hl_pass.s`, 1,672 B at
+  `0x612e7000`; `tools/omdem1mk2_emu_halation_route.py`, stage fixed at 2 on v0.4c17):
+  - `hl_flag` also writes the job marker `0xA0 | (tint − 1) << 2 | stage` at params+31 (→ job+35) when it sets 0x80
+    (tint red for now); `emu_halation_flag` checks the marker in every gated case and 0 elsewhere.
+  - `hl_route` (colour-builder call at `0x603900ec` repointed, 7-byte `call` kept): marked jobs → Art builder; Vivid /
+    Natural / Color Creator get the Art list with `hl_ob` in place of the blur; Monotone stays byte for byte stock.
+  - `hl_ob` (word at `0x60393a54`): a marked job reaches `hl_pass` with the record of 0x1000 and `d0 = tint << 4 | stage`,
+    then the stock blur runs with identical submits, waits and job bytes; unmarked jobs never reach the pass.
+  - `hl_c11` / `hl_c12` (table words `0x6053e164` / `0x6053e16c`): neutral blend for marked jobs, stock 600 / 424 otherwise.
+  - Build switches: `EM1_HL_FORCE_STAGE=1..3` (no Halo control yet), `EM1_HL_NO_PASS=1` (Art route + neutral blend, no
+    pass: the camera A/B of combiner 13 against plain stills).
+  - Open: look tint (4e), Halo control writing sid 961 (4f), time vs the 10 s watchdog (4g), the camera A/B, and which
+    blend input carries record 0x1000 (assumed A, as on the E-P7; if not, the neutral weights must swap).

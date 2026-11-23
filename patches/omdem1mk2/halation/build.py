@@ -27,48 +27,83 @@ END_IMM, OLD_END, NEW_END = 0x60042B6D, 0x612E7000, 0x61300000
 CODE_AT = OLD_END
 HOOK, HOOK_STOCK, BACK = 0x6042285E, bytes.fromhex('f82c1c96257761'), 0x60422865
 GETTER, STAGE_KEY = 0x6005E6CF, 0xF709
+# step 4: route, pass, neutral blend (docs/OMD-EM1-II/HALATION.md "Step 4")
+ROUTE_CALL, ROUTE_STOCK = 0x603900EC, bytes.fromhex('dd843b01000004')       # call 0x603a3c70,[],4 (a0 = job)
+BLUR_WORD, BLUR = 0x60393A54, 0x60398E6F                                     # mov 0x60398e6f,d1 at 0x60393a52
+C11_WORD, C11, C12_WORD, C12 = 0x6053E164, 0x603DD06F, 0x6053E16C, 0x603DD0B8
+SYMS = dict(GETTER=GETTER, STAGE_KEY=STAGE_KEY, BACK=BACK, PLAIN_BUILDER=0x603A3C70, ART_BUILDER=0x60391C1C,
+            BUFIDX=0x6038C01C, BLUR=BLUR, C11=C11, C12=C12, TAIL=0x603DD518, BANK_INIT=0x603DCA05,
+            LOCK=0x6006E9D0, UNLOCK=0x6006EA19, FLUSH=0x60068709, MAPPER=0x6006888F, MODEGET=0x60068B78,
+            MODESET=0x60068B88, MALLOC=0x600231FE, FREE=0x6002323D)
 
 
-def force_stage():
-    value = int(os.environ.get('EM1_HL_FORCE_STAGE', '0'))
-    if not 0 <= value <= 3:
-        raise SystemExit('EM1_HL_FORCE_STAGE must be 0..3')
+def env_int(name, lo, hi):
+    value = int(os.environ.get(name, '0'))
+    if not lo <= value <= hi:
+        raise SystemExit(f'{name} must be {lo}..{hi}')
     return value
 
 
-def assemble(force):
+def force_stage():
+    return env_int('EM1_HL_FORCE_STAGE', 0, 3)
+
+
+def assemble(force, no_pass=0):
+    """hl_flag + hl_route + hl_pass linked as one block at CODE_AT (hl_flag first: its hl_entry is the hook target)."""
     with tempfile.TemporaryDirectory() as t:
         t = Path(t)
-        subprocess.run([str(TC / 'mn10300-elf-as'), f'--defsym=FORCE_STAGE={force}', str(HERE / 'hl_flag.s'),
-                        '-o', str(t / 'o')], check=True)
-        syms = dict(GETTER=GETTER, STAGE_KEY=STAGE_KEY, BACK=BACK)
-        subprocess.run([str(TC / 'mn10300-elf-ld'), f'--section-start=.text={CODE_AT:#x}', '-e', '_start', str(t / 'o'),
-                        '-o', str(t / 'e')] + [f'--defsym={k}={v:#x}' for k, v in syms.items()], check=True)
+        objs = []
+        for name in ('hl_flag', 'hl_route', 'hl_pass'):
+            subprocess.run([str(TC / 'mn10300-elf-as'), f'--defsym=FORCE_STAGE={force}', f'--defsym=NO_PASS={no_pass}',
+                            str(HERE / f'{name}.s'), '-o', str(t / f'{name}.o')], check=True)
+            objs.append(str(t / f'{name}.o'))
+        subprocess.run([str(TC / 'mn10300-elf-ld'), f'--section-start=.text={CODE_AT:#x}', '-e', '_start', *objs,
+                        '-o', str(t / 'e')] + [f'--defsym={k}={v:#x}' for k, v in SYMS.items()], check=True)
         subprocess.run([str(TC / 'mn10300-elf-objcopy'), '-O', 'binary', str(t / 'e'), str(t / 'b')], check=True)
         nm = subprocess.run([str(TC / 'mn10300-elf-nm'), str(t / 'e')], capture_output=True, text=True).stdout
         syms = {p[2]: int(p[0], 16) for p in (line.split() for line in nm.splitlines()) if len(p) == 3}
         return (t / 'b').read_bytes(), syms
 
 
-def build():
+def make_edits(force, no_pass):
+    """-> (spec dict, symbols, code size) for the given stage override and pass switch; writes nothing."""
     d = BIN.read_bytes()
     assert d[END_IMM - 2 - B:END_IMM + 4 - B] == b'\xfc\xcc' + struct.pack('<I', OLD_END), 'end-word stub changed'
     assert d[HOOK - B:HOOK + 7 - B] == HOOK_STOCK, 'converter entry changed'
-    force = force_stage()
-    code, syms = assemble(force)
+    for addr, stock in ((ROUTE_CALL, ROUTE_STOCK), (BLUR_WORD, struct.pack('<I', BLUR)),
+                        (C11_WORD, struct.pack('<I', C11)), (C12_WORD, struct.pack('<I', C12))):
+        assert d[addr - B:addr - B + len(stock)] == stock, f'stock bytes changed at {addr:#x}'
+    code, syms = assemble(force, no_pass)
     assert d[CODE_AT - B:CODE_AT + len(code) - B] == b'\xff' * len(code), 'code area not 0xFF'
+    assert CODE_AT + len(code) <= NEW_END
     jump = b'\xdc' + struct.pack('<i', syms['hl_entry'] - HOOK) + b'\xcb\xcb'
+    route = b'\xdd' + struct.pack('<i', syms['hl_route'] - ROUTE_CALL) + b'\x00\x04'      # regs none, frame 4
+    assert len(route) == len(ROUTE_STOCK)
     e = lambda a, old, new, why: dict(kind='0x100', addr=f'{a:#x}', expect=old.hex(), new=new.hex(), why=why)
     stage = f'stage fixed at {force} (TEST BUILD)' if force else 'stage from sid 961'
+    word = lambda a, v, why: e(a, d[a - B:a - B + 4], struct.pack('<I', v), why)
     edits = [
         e(END_IMM, d[END_IMM - B:END_IMM + 4 - B], struct.pack('<I', NEW_END),
           'halation: section 6 loaded end 0x612e7000 -> 0x61300000 (as space probe sp1)'),
-        e(CODE_AT, d[CODE_AT - B:CODE_AT + len(code) - B], code, f'halation flag gate hl_flag ({len(code)} B, {stage})'),
+        e(CODE_AT, d[CODE_AT - B:CODE_AT + len(code) - B], code,
+          f'halation: hl_flag + hl_route + hl_pass ({len(code)} B, {stage}{", NO PASS" if no_pass else ""})'),
         e(HOOK, HOOK_STOCK, jump, 'halation: flag converter entry -> hl_flag (jmp; nop; nop)'),
+        e(ROUTE_CALL, ROUTE_STOCK, route, 'halation: colour-builder call -> hl_route (marked jobs take the Art builder)'),
+        word(BLUR_WORD, syms['hl_ob'], 'halation: Soft Focus blur work-list word -> hl_ob (pass on record 0x1000)'),
+        word(C11_WORD, syms['hl_c11'], 'halation: combiner 11 -> hl_c11 (neutral blend for marked jobs)'),
+        word(C12_WORD, syms['hl_c12'], 'halation: combiner 12 -> hl_c12 (neutral blend for marked jobs)'),
     ]
-    (HERE / 'edits.json').write_text(json.dumps({'patch': 'halation', 'force_stage': force, 'edits': edits}, indent=1)
-                                     + '\n')
-    print(f'halation: hl_flag {len(code)} B at {CODE_AT:#x}, {stage}')
+    spec = {'patch': 'halation', 'force_stage': force, 'no_pass': no_pass, 'edits': edits}
+    return spec, syms, len(code)
+
+
+def build():
+    force, no_pass = force_stage(), env_int('EM1_HL_NO_PASS', 0, 1)
+    spec, syms, size = make_edits(force, no_pass)
+    stage = f'stage fixed at {force} (TEST BUILD)' if force else 'stage from sid 961'
+    (HERE / 'edits.json').write_text(json.dumps(spec, indent=1) + '\n')
+    print(f'halation: {size} B at {CODE_AT:#x} (hl_route {syms["hl_route"]:#x}, hl_ob {syms["hl_ob"]:#x}, '
+          f'hl_pass {syms["hl_pass"]:#x}), {stage}{", no pass" if no_pass else ""}')
 
 
 if __name__ == '__main__':

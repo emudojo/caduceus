@@ -41,11 +41,15 @@ def convert(emu, art, mode, kind, seed):
     request = bytearray(0x100)
     struct.pack_into('<I', request, 28, CAPTURE)
     struct.pack_into('<H', request, 194, kind)
-    extra = (Region('request', REQUEST, bytes(request), 'r'), Region('flags', FLAGS, struct.pack('<I', seed), 'rw', True),
+    params = bytearray(32)                                  # the caller's params block: flags at +12, marker at +31
+    struct.pack_into('<I', params, 12, seed)
+    extra = (Region('request', REQUEST, bytes(request), 'r'), Region('params', FLAGS - 12, bytes(params), 'rw', True),
              Region('capture', CAPTURE, bytes(capture), 'r'))
     regs = emu.call(CONVERTER, 0x30, 20, {'a0': REQUEST, 'a1': FLAGS, 'a2': 0x11112222, 'a3': 0x33334444}, extra)
     assert (regs['a2'], regs['a3'], regs['sp']) == (0x11112222, 0x33334444, V.SP), regs
-    return struct.unpack('<I', emu.captured['flags'])[0]
+    out = emu.captured['params']
+    assert out[:12] == bytes(12) and out[16:31] == bytes(15), 'params outside the flags and marker changed'
+    return struct.unpack_from('<I', out, 12)[0], out[31]
 
 
 def spec_with_release(path):
@@ -67,21 +71,25 @@ def main():
     a = p.parse_args()
     stock, patched = S.Emu(None), S.Emu(spec_with_release(a.spec))
     cases = list(itertools.product(ARTS, MODES, KINDS, SEEDS))
-    stock_flags = {case: convert(stock, *case) for case in cases}      # stock does not read the stage
+    stock_flags = {}
+    for case in cases:                                                  # stock does not read the stage
+        stock_flags[case], marker = convert(stock, *case)
+        assert marker == 0
     n = added = 0
     for stage in STAGES:
         assert patched.set_value(961, stage) == 0
         effective = a.force_stage or stage
         for case in cases:
             art, mode, kind, seed = case
-            want = stock_flags[case]
+            want, want_marker = stock_flags[case], 0
             if gate(effective, art, mode, kind):
                 want |= 0x80
+                want_marker = 0xA0 | effective                       # tint bits 0 = red
                 added += 1
-            got = convert(patched, art, mode, kind, seed)
-            assert got == want, (stage, art, mode, hex(kind), hex(seed), hex(got), hex(want))
+            got, marker = convert(patched, art, mode, kind, seed)
+            assert (got, marker) == (want, want_marker), (stage, art, mode, hex(kind), hex(seed), hex(got), hex(marker))
             n += 1
-    print(f'{n} converter runs: flags = stock exactly, plus 0x80 in the {added} gated cases '
+    print(f'{n} converter runs: flags = stock exactly, plus 0x80 and marker 0xA0|stage at params+31 in the {added} gated cases '
           f'({"stage forced to %d" % a.force_stage if a.force_stage else "stage from sid 961"})')
     print('RESULT PASS')
 
