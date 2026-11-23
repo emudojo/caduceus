@@ -185,7 +185,9 @@ wheel's vividness also stays 0, that is a separate symptom.
   look tint, Halo row in color_creator_wheel writing sid 961; each emulated first.
   2026-11-23: all built and emulated; watchdog 30 s; test builds v0.4c22t (no-pass diagnostic: JPEG must match
   v0.4c17) and v0.4c23t (glow, stage fixed at Med) sealed (narrowed gate; v0.4c20t / v0.4c21t withdrawn).
-  Camera order: v0.4c17 first (never flashed on the catalog stock), then v0.4c22t, then v0.4c23t. NEXT: camera test of both, then the stage from sid 961.
+  Camera order: v0.4c17 first (never flashed on the catalog stock), then v0.4c22t, then v0.4c23t, then the release
+  candidate v0.4c24 (stage from the Halo page, default Off). Protocol: docs/OMD-EM1-II/thu-may-halation.md; card-ready
+  folders: out/em1mk2-thu-may/1..4 (rebuild with caduceus.py build if out/ is gone). NEXT: camera test of both, then the stage from sid 961.
 * Code goes in the 100 KB region; the 162 KB gap 0x60bc8800..0x60bf1000 can be probed the same way if needed.
 
 ### Priority 3: aspect, still untested on camera

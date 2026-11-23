@@ -5,6 +5,16 @@ Container update package: `E1259999.BIN` (93,050,944 bytes) installed via `DCOLY
 
 ---
 
+## v0.4c24 — 2026-11-23 (halation release candidate; emulator-checked, not camera-tested)
+
+- v0.4c23t with the strength taken from the Color Creator **Halo** page (Off / Low / Med / High, sid 961). It starts at
+  **Off** (the setting's default; stock never writes it), so right after flashing photos match v0.4c17 until Halo is
+  turned on. A stored value outside 0..3 counts as Off.
+- Flash it only after v0.4c22t and v0.4c23t have passed on the camera (`docs/OMD-EM1-II/thu-may-halation.md`).
+- Emulator: every v0.4c23t check, plus the stage read from sid 961 through the real settings store (`emu_halation_flag`
+  without a forced stage, tint cases included), `emu_spare_setting` on this spec, and the route / pass / combiner checks
+  on this image with only hl_flag's own getter call fixed to Med (`emu_halation_route --stage-setting`).
+
 ## v0.4c23t — 2026-11-23 (halation glow camera-test build; emulator-checked, not camera-tested)
 
 - **First build that should show halation.** Vivid / Natural / Color Creator stills get a tinted glow around bright

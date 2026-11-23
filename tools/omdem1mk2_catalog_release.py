@@ -24,12 +24,14 @@ HALATION_TEST_VERSION = 'v0.4c18t'      # v0.4c17 + halation step 3 with a fixed
 HALATION_EDITS = ROOT / 'patches/omdem1mk2/halation/edits.json'
 SHARP_TEST_VERSION = 'v0.4c19t'       # v0.4c17 + Sharpness linear scale (camera test only)
 SHARP_EDITS = ROOT / 'patches/omdem1mk2/sharp_scale/edits.json'
-# Halation step 4 camera tests: v0.4c17 + the Color Creator Halo page + halation with the stage fixed at Med (2) and the
-# watchdog timeout at 30 s. Value: EM1_HL_NO_PASS (1 = Art route + neutral blend only, the combiner 13 A/B).
+# Halation step 4: v0.4c17 + the Color Creator Halo page + halation, watchdog timeout 30 s. Value: (forced stage, no
+# pass). The two camera tests fix the stage at Med (2); no_pass 1 = Art route + neutral blend only (combiner 13 A/B).
+# The release candidate reads the stage from the Halo page (sid 961, default 0 = Off).
 HALO_DIAG_VERSION = 'v0.4c22t'
 HALO_GLOW_VERSION = 'v0.4c23t'
-HALO_TESTS = {HALO_DIAG_VERSION: 1, HALO_GLOW_VERSION: 0}
+HALO_RELEASE_VERSION = 'v0.4c24'
 HALO_STAGE = 2
+HALO_BUILDS = {HALO_DIAG_VERSION: (HALO_STAGE, 1), HALO_GLOW_VERSION: (HALO_STAGE, 0), HALO_RELEASE_VERSION: (0, 0)}
 WHEEL_EDITS = ROOT / 'patches/omdem1mk2/color_creator_wheel/edits.json'
 HALO_WHEEL_EDITS = ROOT / 'patches/omdem1mk2/color_creator_wheel/edits_halo.json'
 HALO_PAGE_ADDR = '0x612f0000'             # the Halo page section, in the gap the halation edits make Section 6 load
@@ -107,13 +109,14 @@ def halation_test_spec(spec):
             'edits': [*patch['edits'], *spec['edits']]}
 
 
-def halo_test_spec(spec, version):
-    """The halation edits built here (stage fixed at HALO_STAGE) in front of a v0.4c17 spec with the Halo wheel."""
+def halo_spec(spec, version):
+    """The halation edits built here (HALO_BUILDS[version]) in front of a v0.4c17 spec with the Halo wheel."""
     loader = importlib.util.spec_from_file_location('hl_build', ROOT / 'patches/omdem1mk2/halation/build.py')
     build = importlib.util.module_from_spec(loader)
     loader.loader.exec_module(build)
-    patch, _, _ = build.make_edits(HALO_STAGE, HALO_TESTS[version])
-    return {**spec, 'version': version, 'halation_force_stage': HALO_STAGE, 'halation_no_pass': HALO_TESTS[version],
+    stage, no_pass = HALO_BUILDS[version]
+    patch, _, _ = build.make_edits(stage, no_pass)
+    return {**spec, 'version': version, 'halation_force_stage': stage, 'halation_no_pass': no_pass,
             'edits': [*patch['edits'], *spec['edits']]}
 
 
@@ -150,19 +153,23 @@ def validate(spec_path, version):
     for tool in ('emu_aspect', 'emu_fixed_patches', 'emu_sdload', 'emu_af', 'emu_artflags', 'emu_capture_kind', 'emu_combiner',
                  'emu_blend_setup', 'emu_mapper'):
         run(tool, spec_path)
-    if version in (COLOR_CREATOR_VERSION, HALATION_TEST_VERSION, SHARP_TEST_VERSION, *HALO_TESTS):
+    if version in (COLOR_CREATOR_VERSION, HALATION_TEST_VERSION, SHARP_TEST_VERSION, *HALO_BUILDS):
         run('emu_color_creator', spec_path)
     if version == SHARP_TEST_VERSION:
         run('emu_sharp_scale', spec_path)
     if version == HALATION_TEST_VERSION:
         stage = json.loads(Path(spec_path).read_text(encoding='utf-8'))['halation_force_stage']
         run('emu_halation_flag', spec_path, '--force-stage', stage)
-    if version in HALO_TESTS:
-        run('emu_halation_flag', spec_path, '--force-stage', HALO_STAGE)
-        run('emu_halation_route', spec_path, *(['--no-pass'] if HALO_TESTS[version] else []))
+    if version in HALO_BUILDS:
+        stage, no_pass = HALO_BUILDS[version]
+        run('emu_halation_flag', spec_path, *(['--force-stage', stage] if stage else []))
+        run('emu_halation_route', spec_path, *(['--no-pass'] if no_pass else []),
+            *([] if stage else ['--stage-setting']))
         run('emu_halo_page', spec_path)
         run('emu_watchdog', spec_path)
-        if not HALO_TESTS[version]:
+        if not stage:
+            run('emu_spare_setting', spec_path)
+        if not no_pass:
             run('emu_halation_pass')
     # Both releases preserve the camera-tested v0.4c15 aspect assets byte for byte.
     run('emu_scp', spec_path, '--reference', ROOT / 'releases' / CAMERA / BASE_RELEASE / 'edits.json')
@@ -181,8 +188,8 @@ def seal(stock_path, version):
     spec = catalog_spec(legacy, main)
     if version in (COLOR_CREATOR_VERSION, HALATION_TEST_VERSION, SHARP_TEST_VERSION):
         spec = replace_color_creator_edits(spec)
-    if version in HALO_TESTS:
-        spec = halo_test_spec(replace_color_creator_edits(spec, HALO_WHEEL_EDITS, (HALO_PAGE_ADDR,)), version)
+    if version in HALO_BUILDS:
+        spec = halo_spec(replace_color_creator_edits(spec, HALO_WHEEL_EDITS, (HALO_PAGE_ADDR,)), version)
     if version == HALATION_TEST_VERSION:
         spec = halation_test_spec(spec)
     if version == SHARP_TEST_VERSION:
@@ -230,7 +237,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--stock', type=Path, required=True)
     parser.add_argument('--version', choices=(VERSION, COLOR_CREATOR_VERSION, HALATION_TEST_VERSION, SHARP_TEST_VERSION,
-                                                 *HALO_TESTS), default=VERSION)
+                                                 *HALO_BUILDS), default=VERSION)
     args = parser.parse_args()
     try:
         seal(args.stock, args.version)

@@ -44,13 +44,14 @@ def load_build():
     return mod
 
 
-def spec_files(spec=None, no_pass=0):
-    """(patched spec path, symbols): SPEC, or v0.4c17 + the halation edits with the stage fixed at 2."""
-    hl, syms, _ = load_build().make_edits(STAGE, no_pass)
+def spec_files(spec=None, no_pass=0, setting=False):
+    """(patched spec path, symbols): SPEC, or v0.4c17 + the halation edits with the stage fixed at 2 (or, with
+    `setting`, read from sid 961)."""
+    hl, syms, _ = load_build().make_edits(0 if setting else STAGE, no_pass)
     if spec:
         have = json.load(open(spec))['edits']
         missing = [e['addr'] for e in hl['edits'] if e not in have]
-        assert not missing, f'{spec} lacks these stage-2 halation edits (no_pass={no_pass}): {missing}'
+        assert not missing, f'{spec} lacks these halation edits (setting={setting}, no_pass={no_pass}): {missing}'
         return spec, syms
     base = json.load(open(BASE_SPEC))
     base['edits'] = hl['edits'] + base['edits']
@@ -58,6 +59,16 @@ def spec_files(spec=None, no_pass=0):
     json.dump(base, f)
     f.close()
     return f.name, syms
+
+
+def fix_stage(img, syms):
+    """A build that reads the stage from sid 961: replace hl_flag's own getter call (7 bytes, hl_stage_get) with
+    `mov STAGE,d0` + nops. Only the patch's code changes; the sid-961 read itself is checked by emu_halation_flag."""
+    m = bytearray(img)
+    o = syms['hl_stage_get'] - V.B
+    assert m[o] == 0xDD and m[o + 5:o + 7] == b'\xc0\x0c', m[o:o + 7].hex()
+    m[o:o + 7] = bytes([0x80, STAGE]) + b'\xcb' * 5
+    return bytes(m)
 
 
 def capture_job(img, mode, kind=0x1000):
@@ -178,12 +189,17 @@ def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument('spec', nargs='?')
     p.add_argument('--no-pass', action='store_true')
+    p.add_argument('--stage-setting', action='store_true',
+                   help='the spec reads the stage from sid 961; run with that read fixed at 2 (fix_stage)')
     a = p.parse_args()
-    path, syms = spec_files(a.spec, int(a.no_pass))
+    path, syms = spec_files(a.spec, int(a.no_pass), a.stage_setting)
     stock, patched = W.image(BASE_SPEC), W.image(path)
+    if a.stage_setting:
+        patched = fix_stage(patched, syms)
+        print(f'stage read from sid 961; hl_flag getter call at {syms["hl_stage_get"]:#x} fixed to stage {STAGE}')
     mark = check_route(stock, patched, syms)
     (check_ob_no_pass if a.no_pass else check_ob)(stock, patched, syms, mark)
-    check_combiners(V.image(BASE_SPEC), V.image(path), syms)
+    check_combiners(V.image(BASE_SPEC), V.image(path), syms)     # combiners do not read the stage setting
     print('RESULT PASS')
 
 

@@ -306,3 +306,11 @@ SYS code. Cost: a real hang restarts after up to 30 s instead of 10 s.
     gated cases (kinds 0x1002 / 0x2000 added). `emu_halation_route`: Vivid of kinds 0x1002 / 0x2000 / 0x2001 / 0x1008
     byte for byte stock; combiners: marker without 0x80, stage 0 and another byte give stock. The marked job for modes
     1 / 2 / 10 is byte for byte the v0.4c21t job except the hl_ob address.
+  - **Release candidate `v0.4c24` [E]:** v0.4c23t with the stage read from sid 961 (default 0 = Off). Sealing adds
+    `emu_halation_flag` without `--force-stage` (the real settings store), `emu_spare_setting` and
+    `emu_halation_route --stage-setting`, which runs the sealed image with only hl_flag's own getter call (label
+    `hl_stage_get`) replaced by `mov 2,d0`. Camera order and pass criteria (Vietnamese):
+    [thu-may-halation.md](thu-may-halation.md).
+  - **Not knowable in the emulator:** the bus address the camera gives record 0x1000. The fixture uses 0x8c000000;
+    `hl_pass` refuses below 0x84000000 and then leaves the photo untouched. No glow on v0.4c23t with an otherwise normal
+    camera points there first.

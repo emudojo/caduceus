@@ -44,6 +44,7 @@ hl_entry:
     mov STAGE_KEY,d0          /* property getter(key, index 0, a0 = 0), as stock 0x604226d2 calls it */
     clr d1
     mov 0,a0
+hl_stage_get:                 /* label only: route harnesses replace this 7-byte call with a fixed stage */
     call GETTER,[d2,d3],12
 .endif
     cmp 0,d0
