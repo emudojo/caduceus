@@ -64,7 +64,9 @@ def capture_job(img, mode):
     r = execute([Region('caller', M.CALLER, code, 'rx'), *M.common(img),
                  Region('request', M.REQUEST, bytes(request), 'rw', True), Region('capture', W.CAPTURE, bytes(capture), 'r'),
                  Region('capture_state', W.CAPTURE_STATE, bytes(4), 'r'),
-                 Region('job', M.JOB, bytes(M.JOB_SIZE), 'rw', True), Region('job_aux', W.JOB_AUX, bytes(5764), 'rw', True)],
+                 Region('job', M.JOB, bytes(M.JOB_SIZE), 'rw', True), Region('job_aux', W.JOB_AUX, bytes(5764), 'rw', True),
+                 # hl_flag's tint lookup reads the P handle (0x621e24ae): none here, so the tint stays red
+                 Region('p_handle', 0x621E2000, bytes(0x1000), 'r')],
                 dict(pc=M.CALLER, sp=M.STACK + 0xF00, a0=M.REQUEST), W.JOB_PUBLISHED, limit=2_000_000,
                 breakpoints=[M.CALLER + 7])
     assert r['status'] == 'returned' and r['registers']['pc'] == W.JOB_PUBLISHED, (r['status'], r['fault'])

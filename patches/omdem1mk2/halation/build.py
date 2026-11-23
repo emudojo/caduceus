@@ -34,7 +34,10 @@ C11_WORD, C11, C12_WORD, C12 = 0x6053E164, 0x603DD06F, 0x6053E16C, 0x603DD0B8
 SYMS = dict(GETTER=GETTER, STAGE_KEY=STAGE_KEY, BACK=BACK, PLAIN_BUILDER=0x603A3C70, ART_BUILDER=0x60391C1C,
             BUFIDX=0x6038C01C, BLUR=BLUR, C11=C11, C12=C12, TAIL=0x603DD518, BANK_INIT=0x603DCA05,
             LOCK=0x6006E9D0, UNLOCK=0x6006EA19, FLUSH=0x60068709, MAPPER=0x6006888F, MODEGET=0x60068B78,
-            MODESET=0x60068B88, MALLOC=0x600231FE, FREE=0x6002323D)
+            MODESET=0x60068B88, MALLOC=0x600231FE, FREE=0x6002323D,
+            # look tint (step 4e): sd_loader's p_get and color_creator_wheel's built-in look table
+            P_GET=int(json.loads((HERE.parent / 'sd_loader/exports.json').read_text())['p_get'], 16),
+            BUILTIN=0x60BC8150)
 
 
 def env_int(name, lo, hi):

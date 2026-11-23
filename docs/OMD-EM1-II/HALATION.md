@@ -253,3 +253,18 @@ need confirmation before deciding whether to change the timeout.
     pass: the camera A/B of combiner 13 against plain stills).
   - Open: look tint (4e), Halo control writing sid 961 (4f), time vs the 10 s watchdog (4g), the camera A/B, and which
     blend input carries record 0x1000 (assumed A, as on the E-P7; if not, the neutral weights must swap).
+- **Look tint (4e) [E]:** `hl_flag` takes the tint from the active look: P (sd_loader `p_get`) → `P_ACTIVE` = 1 → the record
+  of `P_LOOK` (card buffer when the editor applied the card and the index is inside the pack, else the built-in table
+  `0x60bc8150`) → byte +47 (1 red, 2 amber, 3 warm, 4 cool) into the marker; no P, no active look or a tint outside 1..4
+  keeps red. `emu_halation_flag` checks no P, inactive, all 16 built-in looks, card looks 2/3/4 and an index past the pack.
+- **Halo control (4f) [E]:** `color_creator_wheel` built with `EM1_CC_HALO=1` (`edits_halo.json`; the default
+  `edits.json` is byte for byte unchanged) adds page 4 "Halo Off/Low/Med/High": RIGHT / LEFT step sid 961 through the
+  facade, clamped 0..3, a stored value outside 0..3 counts as Off; the code is section `.hlui` at `0x612f0000` in the
+  gap the halation patch loads (two 9-byte branches in the Section 6 cave, which ends at `0x612e6fe4`).
+  `tools/omdem1mk2_emu_halo_page.py`. Cosmetic: the SCP tile on page 4 shows page 0's mode label (`and 3`).
+- **Time (4g) [E count, I time]:** instruction counts of `hl_pass` (640×448, scaled per pixel): no highlights ≈ 1
+  instr/px (pass A only); a night scene with lights covering 19 of 70 cells ≈ 20.5 instr/px; above the 1/3 coverage cap
+  the write pass is skipped (≈ 1 instr/px). Windowed access adds 1–2 %. At the E-P7's measured 0.2–0.33 s per instr/px
+  for a full frame that is ≈ 0.2–0.3 s without lights and **≈ 4–7 s** for a night scene with lights (more near the cap),
+  on top of the Soft Focus passes — close to the stock 10 s watchdog (`0x6005aecc` passes 10). The E-P7 restarted on
+  bright frames until v0.31b raised its timeout to 30 s. Decision pending: raise the timeout, lower the cap, or both.

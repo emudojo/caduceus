@@ -53,9 +53,47 @@ hl_entry:
     beq hl_done
     cmp 3,d0
     bhi hl_done               /* SetValue does not range-check: anything above 3 (or negative) is Off */
-    mov d0,d1                 /* job marker: params+31 -> job+35 = 0xA0 | (tint - 1) << 2 | stage (tint red for now) */
+    mov d0,d1                 /* job marker: params+31 -> job+35 = 0xA0 | (tint - 1) << 2 | stage, red first */
     or 0xa0,d1
     movbu d1,(19,a2)          /* a2 = params+12 */
+    /* Tint from the active look (LOOKS.BIN record +47: 1 red, 2 amber, 3 warm, 4 cool); anything else keeps red.
+     * The record is found as color_creator_wheel's look_rec does: card buffer when the editor applied the card,
+     * else the built-in table. p_get (sd_loader) only reads memory. */
+    call P_GET,[d2,d3],12     /* a0 = P or 0 */
+    cmp 0,a0
+    beq 7f
+    movbu (30,a0),d0          /* P_ACTIVE: a colour look drives the COLOR engine */
+    cmp 1,d0
+    bne 7f
+    movhu (16,a0),d0          /* P_LOOK */
+    movhu (20,a0),d1          /* P_INIT: 2 = card */
+    cmp 2,d1
+    bne 5f
+    mov (8,a0),a1             /* P_BUF */
+    cmp 0,a1
+    beq 5f
+    movhu (28,a0),d1          /* P_NLOOKS */
+    cmp d1,d0
+    bcc 5f
+    asl 6,d0
+    add 64,d0
+    add d0,a1
+    bra 6f
+5:
+    and 15,d0
+    asl 6,d0
+    mov BUILTIN,a1
+    add d0,a1
+6:
+    movbu (47,a1),d0          /* tint */
+    add -1,d0
+    cmp 4,d0
+    bcc 7f
+    asl 2,d0
+    movbu (19,a2),d1
+    or d0,d1
+    movbu d1,(19,a2)
+7:
     mov (a2),d0
     or 0x80,d0
     mov d0,(a2)

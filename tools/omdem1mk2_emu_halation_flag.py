@@ -35,7 +35,7 @@ def gate(stage, art, mode, kind):
         kind not in (0x2001, 0x2006, 0x1008, 0x1006)
 
 
-def convert(emu, art, mode, kind, seed):
+def convert(emu, art, mode, kind, seed, more=()):
     capture = bytearray(0x6200)
     capture[24951], capture[24203] = art, mode
     request = bytearray(0x100)
@@ -44,12 +44,53 @@ def convert(emu, art, mode, kind, seed):
     params = bytearray(32)                                  # the caller's params block: flags at +12, marker at +31
     struct.pack_into('<I', params, 12, seed)
     extra = (Region('request', REQUEST, bytes(request), 'r'), Region('params', FLAGS - 12, bytes(params), 'rw', True),
-             Region('capture', CAPTURE, bytes(capture), 'r'))
+             Region('capture', CAPTURE, bytes(capture), 'r'), *more)
     regs = emu.call(CONVERTER, 0x30, 20, {'a0': REQUEST, 'a1': FLAGS, 'a2': 0x11112222, 'a3': 0x33334444}, extra)
     assert (regs['a2'], regs['a3'], regs['sp']) == (0x11112222, 0x33334444, V.SP), regs
     out = emu.captured['params']
     assert out[:12] == bytes(12) and out[16:31] == bytes(15), 'params outside the flags and marker changed'
     return struct.unpack_from('<I', out, 12)[0], out[31]
+
+P_HANDLE_ADDR, P_BASE, P_MAGIC = 0x621E24AE, 0xA1B00000, 0x50314D45
+P_AT = 0xA1C00000                                      # handle 0x2000
+CARD_AT = 0xA1C01000
+BUILTIN, TINT_OFF = 0x60BC8150, 47
+
+
+def p_block(active, init, look, nlooks=0):
+    blk = bytearray(256)
+    struct.pack_into('<IH', blk, 0, P_MAGIC, (P_AT - P_BASE) >> 7)
+    struct.pack_into('<I', blk, 8, CARD_AT if init == 2 else 0)
+    struct.pack_into('<HHH', blk, 16, look, 0, init)
+    struct.pack_into('<H', blk, 28, nlooks)
+    blk[30] = active
+    return bytes(blk)
+
+
+def check_tint(patched, img):
+    """Gated shot (stage 2, Vivid, no Art Effect, kind 0x1000): the marker's tint bits follow the active look."""
+    assert patched.set_value(961, 2) == 0
+    builtin = [img[BUILTIN - V.B + 64 * k + TINT_OFF] for k in range(16)]
+    card = bytearray(64 + 64 * 3)
+    for i, t in enumerate((2, 3, 4)):
+        card[64 + 64 * i + TINT_OFF] = t
+    want = lambda t: 0xA2 | ((t - 1) << 2 if 1 <= t <= 4 else 0)
+    cases = [(None, 0xA2), (p_block(0, 1, 3), 0xA2)]
+    cases += [(p_block(1, 1, k), want(builtin[k])) for k in range(16)]
+    cases += [(p_block(1, 2, k, 3), want((2, 3, 4)[k])) for k in range(3)]
+    cases += [(p_block(1, 2, 5, 3), want(builtin[5]))]                # index past the card pack -> built-in table
+    n = 0
+    for blk, marker in cases:
+        handle = 0 if blk is None else (P_AT - P_BASE) >> 7
+        patched.write(P_HANDLE_ADDR, struct.pack('<H', handle))
+        more = () if blk is None else (Region('p', P_AT, blk, 'r'), Region('card', CARD_AT, bytes(card), 'r'))
+        flags, got = convert(patched, 0, 1, 0x1000, 0, more)
+        assert flags & 0x80 and got == marker, (n, hex(got), hex(marker))
+        n += 1
+    patched.write(P_HANDLE_ADDR, bytes(2))
+    tints = sorted(set(builtin))
+    print(f'tint: {n} cases (no P, look inactive, 16 built-in looks with tints {tints}, card looks 2/3/4, index past the '
+          'card pack) give the expected marker; tint 0 or > 4 stays red')
 
 
 def spec_with_release(path):
@@ -89,6 +130,8 @@ def main():
             got, marker = convert(patched, art, mode, kind, seed)
             assert (got, marker) == (want, want_marker), (stage, art, mode, hex(kind), hex(seed), hex(got), hex(marker))
             n += 1
+    if not a.force_stage:
+        check_tint(patched, V.image(spec_with_release(a.spec)))
     print(f'{n} converter runs: flags = stock exactly, plus 0x80 and marker 0xA0|stage at params+31 in the {added} gated cases '
           f'({"stage forced to %d" % a.force_stage if a.force_stage else "stage from sid 961"})')
     print('RESULT PASS')
