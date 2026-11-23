@@ -180,3 +180,18 @@ need confirmation before deciding whether to change the timeout.
 3. Step 3 built and emulated (above); test release `v0.4c18t` awaits the camera.
 3. Bloom route (useful alone, and it provides the finished YCbCr buffer), one camera test.
 4. Halation pass with the global stage and gate above, then the camera control; emulator proof as in §"How", then camera.
+
+## Step 4: tinted halation pass (in progress, 2026-11-23; plan `plans/261123-0838-em1ii-halation-step4/plan.md`)
+
+- **Route [S]:** the E-M1 blend setup is synchronous like the E-P7's: it queues the blend (`0x60390536`), waits for it
+  (`0x60390293` → `0x603901f3`) and only then frees the sources, so on return buffer 0x1000 holds the blended photo. The
+  work-list runner calls each item (job+10984, 12 B, function at +4) with `calls` and a0 = job (`0x60392765`,
+  `0x60392a0a`, `0x60392bba`). Repointing the immediate at `0x60393a6b` to a wrapper runs the pass there, as the E-P7 `gc_gs`.
+- **Pass [E]:** `patches/omdem1mk2/halation/hl_pass.s` = the E-P7 h1/h2 passes A/B/C instruction for instruction, with the
+  E-M1 bus guard (0xa0000000..0xafffffff direct; 0x84000000..0x9fffffff and 0xb0000000 up windowed; below 0x84000000
+  refused), per-piece window open (lock, mode get, mapper, flush or mode restore, unlock) and the E-M1 allocators.
+  `tools/omdem1mk2_emu_halation_pass.py`: 36 cases bit-exact with `tools/omdem1mk2_halation_model.py` (direct, windowed and
+  a buffer crossing 0xd0000000, every stage × tint); daylight cap, no highlights, malloc failures, bad format and bad bus
+  leave the photo untouched; locks == unlocks, frees balanced, the window mode restored.
+- **Not yet:** the wrapper and per-job decision (4a/4b), combiner neutral blend (4c), look tint (4e), Halo control (4f),
+  time budget vs the 10 s watchdog (4g). Nothing of step 4 is in a release.
