@@ -60,12 +60,12 @@ def spec_files(spec=None, no_pass=0):
     return f.name, syms
 
 
-def capture_job(img, mode):
+def capture_job(img, mode, kind=0x1000):
     """A.capture_job without the emulator-only route stubs: the image carries the real patch."""
     request = bytearray(0x2000)
     struct.pack_into('<I', request, 4, W.CAPTURE_STATE)
     struct.pack_into('<I', request, 28, W.CAPTURE)
-    struct.pack_into('<H', request, 194, 0x1000)
+    struct.pack_into('<H', request, 194, kind)
     request[294] = 1
     capture = bytearray(0x7000)
     capture[24203] = mode
@@ -92,8 +92,10 @@ def check_route(stock, patched, syms):
         marked[mode] = job
     for mode in (5,):
         assert capture_job(patched, mode) == capture_job(stock, mode), mode
-    print(f'A route: Vivid / Natural / Color Creator -> marker {MARK:#x}, Art list with hl_ob for the blur; '
-          'Monotone byte for byte stock')
+    for kind in (0x1002, 0x2000, 0x2001, 0x1008):
+        assert capture_job(patched, 1, kind) == capture_job(stock, 1, kind), hex(kind)
+    print(f'A route: Vivid / Natural / Color Creator -> marker {MARK:#x}, flag 0x80 set at the route, Art list with hl_ob '
+          'for the blur; Monotone and Vivid of kinds 0x1002 / 0x2000 / 0x2001 / 0x1008 byte for byte stock')
     return marked[1]
 
 
@@ -140,13 +142,17 @@ def check_ob(stock, patched, syms, mark):
 
 
 def check_combiners(stock, patched, syms):
-    for marker, label in ((MARK, 'marked'), (0, 'unmarked')):
-        for effect, want in ((0x402, C.NEUTRAL_WEIGHTS if marker else C.STOCK_WEIGHTS),
-                             (0x403, C.NEUTRAL_WEIGHTS if marker else C.STOCK_WEIGHTS)):
+    cases = ((MARK, 0x80, 'marked', True), (0, 0x80, 'unmarked (stock Soft Focus)', False),
+             (MARK, 0, 'marker without flag 0x80', False), (MARK & 0xFC, 0x80, 'marker with stage 0', False),
+             (0x5A, 0x80, 'other byte', False))
+    for marker, flag, label, neutral in cases:
+        for effect, want in ((0x402, C.NEUTRAL_WEIGHTS if neutral else C.STOCK_WEIGHTS),
+                             (0x403, C.NEUTRAL_WEIGHTS if neutral else C.STOCK_WEIGHTS)):
             banks = []
             for img in (stock, patched):
                 job = bytearray(M.JOB_SIZE)
                 job[35] = marker
+                job[16] = flag
                 request = M.JOB + 11364
                 job[11364 + 16] = 3
                 struct.pack_into('<H', job, 11364 + 656, effect)
@@ -164,7 +170,8 @@ def check_combiners(stock, patched, syms):
             assert C.weights(p_bank) == want[effect], (label, hex(effect), [hex(w) for w in C.weights(p_bank)])
             rest = [o for o in range(0, 0x100, 4) if o not in C.WEIGHTS]
             assert all(p_bank[o:o + 4] == s_bank[o:o + 4] for o in rest), (label, hex(effect))
-    print('C combiners 11 / 12: marked job -> neutral blend, other bank words stock; unmarked job -> stock 600 / 424')
+    print('C combiners 11 / 12: marked job (marker, stage 1..3 and flag 0x80) -> neutral blend, other bank words stock; '
+          'unmarked, marker without 0x80, stage 0 or another byte -> stock 600 / 424')
 
 
 def main():

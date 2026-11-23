@@ -7,9 +7,10 @@ SPEC is an edits.json that contains the halation edits (a release, or patches/om
 is then applied alone). The settings store is the real one (tools/omdem1mk2_emu_spare_setting.py): the stage is
 written to sid 961 through the facade, and hl_flag reads it back through the stock property getter 0x6005e6cf.
 For every stage (0..3 and the out-of-range 7), Art Effect (0, 1 Soft Focus, 2), picture mode (Vivid 1, Natural 2,
-Monotone 5, Color Creator 10, MONO 12, Art Filters 100 and 104), capture kind (0x1000, 0x1001, 0x2001, 0x2006, 0x1008,
-0x1006) and two flag seeds, the patched converter must give exactly the stock flag word, plus 0x80 when the gate
-holds: stage 1..3, Art Effect 0, picture mode < 100 and not 5 / 12, kind not in the four excluded. a2/a3/sp restored.
+Monotone 5, Color Creator 10, MONO 12, Art Filters 100 and 104), capture kind (0x1000, 0x1001, 0x1002, 0x2000, 0x2001,
+0x2006, 0x1008, 0x1006) and two flag seeds, the patched converter must give exactly the stock flag word, and the job
+marker 0xA0 | stage at params+31 only when the gate holds: stage 1..3, Art Effect 0, picture mode < 100 and not 5 / 12,
+kind 0x1000 or 0x1001. The Soft Focus flag 0x80 is not set here (hl_route sets it). a2/a3/sp restored.
 With --force-stage N (a test build) the stage is N whatever sid 961 holds.
 """
 import argparse
@@ -26,13 +27,12 @@ REQUEST, FLAGS, CAPTURE = 0x18030000, 0x18040000, 0x18100000
 STAGES = (0, 1, 2, 3, 7)
 ARTS = (0, 1, 2)
 MODES = (1, 2, 5, 10, 12, 100, 104)
-KINDS = (0x1000, 0x1001, 0x2001, 0x2006, 0x1008, 0x1006)
+KINDS = (0x1000, 0x1001, 0x1002, 0x2000, 0x2001, 0x2006, 0x1008, 0x1006)
 SEEDS = (0x00000000, 0x00214321)
 
 
 def gate(stage, art, mode, kind):
-    return 1 <= stage <= 3 and art == 0 and mode < 100 and mode not in (5, 12) and \
-        kind not in (0x2001, 0x2006, 0x1008, 0x1006)
+    return 1 <= stage <= 3 and art == 0 and mode < 100 and mode not in (5, 12) and kind in (0x1000, 0x1001)
 
 
 def convert(emu, art, mode, kind, seed, more=()):
@@ -85,7 +85,7 @@ def check_tint(patched, img):
         patched.write(P_HANDLE_ADDR, struct.pack('<H', handle))
         more = () if blk is None else (Region('p', P_AT, blk, 'r'), Region('card', CARD_AT, bytes(card), 'r'))
         flags, got = convert(patched, 0, 1, 0x1000, 0, more)
-        assert flags & 0x80 and got == marker, (n, hex(got), hex(marker))
+        assert not flags & 0x80 and got == marker, (n, hex(flags), hex(got), hex(marker))
         n += 1
     patched.write(P_HANDLE_ADDR, bytes(2))
     tints = sorted(set(builtin))
@@ -124,7 +124,6 @@ def main():
             art, mode, kind, seed = case
             want, want_marker = stock_flags[case], 0
             if gate(effective, art, mode, kind):
-                want |= 0x80
                 want_marker = 0xA0 | effective                       # tint bits 0 = red
                 added += 1
             got, marker = convert(patched, art, mode, kind, seed)
@@ -132,7 +131,7 @@ def main():
             n += 1
     if not a.force_stage:
         check_tint(patched, V.image(spec_with_release(a.spec)))
-    print(f'{n} converter runs: flags = stock exactly, plus 0x80 and marker 0xA0|stage at params+31 in the {added} gated cases '
+    print(f'{n} converter runs: flags = stock exactly; marker 0xA0|stage at params+31 only in the {added} gated cases '
           f'({"stage forced to %d" % a.force_stage if a.force_stage else "stage from sid 961"})')
     print('RESULT PASS')
 

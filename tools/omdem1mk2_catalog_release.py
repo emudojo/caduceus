@@ -26,8 +26,8 @@ SHARP_TEST_VERSION = 'v0.4c19t'       # v0.4c17 + Sharpness linear scale (camera
 SHARP_EDITS = ROOT / 'patches/omdem1mk2/sharp_scale/edits.json'
 # Halation step 4 camera tests: v0.4c17 + the Color Creator Halo page + halation with the stage fixed at Med (2) and the
 # watchdog timeout at 30 s. Value: EM1_HL_NO_PASS (1 = Art route + neutral blend only, the combiner 13 A/B).
-HALO_DIAG_VERSION = 'v0.4c20t'
-HALO_GLOW_VERSION = 'v0.4c21t'
+HALO_DIAG_VERSION = 'v0.4c22t'
+HALO_GLOW_VERSION = 'v0.4c23t'
 HALO_TESTS = {HALO_DIAG_VERSION: 1, HALO_GLOW_VERSION: 0}
 HALO_STAGE = 2
 WHEEL_EDITS = ROOT / 'patches/omdem1mk2/color_creator_wheel/edits.json'

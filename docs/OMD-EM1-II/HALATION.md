@@ -288,10 +288,21 @@ SYS code. Cost: a real hang restarts after up to 30 s instead of 10 s.
   path" above).
 - **Camera test builds (4h) [E]** (`tools/omdem1mk2_catalog_release.py`; v0.4c17 + `edits_halo.json` + halation, stage
   fixed at 2, watchdog 30 s):
-  - **`v0.4c20t`** diagnostic (`EM1_HL_NO_PASS=1`): Art route + neutral blend, no pass. Same scene as v0.4c17 → the
+  - **`v0.4c22t`** diagnostic (`EM1_HL_NO_PASS=1`): Art route + neutral blend, no pass. Same scene as v0.4c17 → the
     JPEGs must match; a difference is combiner 13 (`req+1838`) in the Art development.
-  - **`v0.4c21t`** glow: the full pass. Night scene with point lights in Vivid / Natural / Color Creator: tinted glow
+  - **`v0.4c23t`** glow: the full pass. Night scene with point lights in Vivid / Natural / Color Creator: tinted glow
     around the lights; Monotone, an Art Filter, burst and RAW+JPEG stay stock; note the save time and any restart.
   - Sealing runs every v0.4c17 check plus `emu_halation_flag --force-stage 2`, `emu_halation_route` (with `--no-pass`
-    for c20t), `emu_halo_page`, `emu_watchdog` and, for c21t, `emu_halation_pass`, all on the sealed spec. The Halo page
+    for c22t), `emu_halo_page`, `emu_watchdog` and, for c23t, `emu_halation_pass`, all on the sealed spec. The Halo page
     stores sid 961 but the stage stays 2 in both builds.
+  - **Narrowed after review (replaces v0.4c20t / v0.4c21t, never flashed) [E]:** the first gate ORed 0x80 into the
+    flag word in the converter, so a marked job that the constructor (`0x6039009a`) sends to another builder
+    (`0x60399eb9` when params+22 ∉ {0, 4}, `0x60391c25` when params+27 ≠ 0, the Art builder for class 1) or a capture
+    kind nobody emulated (High Res, HDR, bracketing, Live Composite) would have carried Soft Focus into a route stock
+    never gives it. Now `hl_flag` writes only the marker, and only for kinds 0x1000 / 0x1001; `hl_route` ORs 0x80 into
+    job+16 just before `jmp` to the Art builder; `hl_marked` (combiners 11 / 12) needs the marker, stage bits ≠ 0 and
+    0x80 at job+16, so a combiner request outside a job matches only by a three-way coincidence (stock jobs have job+35
+    = 0, from the zeroed params block). `emu_halation_flag`: 1,680 runs, flags = stock exactly, marker only in the 36
+    gated cases (kinds 0x1002 / 0x2000 added). `emu_halation_route`: Vivid of kinds 0x1002 / 0x2000 / 0x2001 / 0x1008
+    byte for byte stock; combiners: marker without 0x80, stage 0 and another byte give stock. The marked job for modes
+    1 / 2 / 10 is byte for byte the v0.4c21t job except the hl_ob address.

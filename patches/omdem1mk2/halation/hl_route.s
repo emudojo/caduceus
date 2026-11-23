@@ -5,15 +5,17 @@
  * The job marker is job+35 (= params+31, written by hl_flag): 0xA0 | (tint - 1) << 2 | stage, stage 1..3, tint 1..4.
  * Stock never writes or reads that byte (tools/omdem1mk2_emu_job_marker.py), so a job without our mark keeps stock paths.
  *
- *   hl_route  the colour-builder call at 0x603900ec now calls here (frame [],4, a0 = job): marked jobs go to the Art
- *             builder 0x60391c1c, which with flag 0x80 builds the Soft Focus list; all others to the stock 0x603a3c70.
+ *   hl_route  the colour-builder call at 0x603900ec now calls here (frame [],4, a0 = job): a marked job gets the Soft
+ *             Focus flag 0x80 in its flag word (job+16) here, the only place the patch sets it, and goes to the Art
+ *             builder 0x60391c1c, which with that flag builds the Soft Focus list; all others go to the stock 0x603a3c70.
  *   hl_ob     the work-list word for the Soft Focus blur 0x60398e6f (immediate at 0x60393a54) now names this. It runs as
  *             a `calls` item with a0 = job, right after development has written and waited for the full-size 0x0302
  *             record 0x1000; for a marked job it runs hl_pass on that record, then continues into 0x60398e6f with sp, the
  *             return slot and a0 exactly as on entry.
  *   hl_c11 /  combiner 11 / 12 table words (0x6053e164 / 0x6053e16c): for a marked job (request - 11329 = job+35) the
  *   hl_c12    blend is neutral (w = 1024: 11 -> A 1024 / B 0, 12 -> A 0 / B 1024), so the blend output is record 0x1000
- *             with the halation; any other job runs the stock handler.
+ *             with the halation; any other job runs the stock handler. "Marked" needs the marker with a stage 1..3 and
+ *             flag 0x80 at job+16 (request - 11348), which only hl_route sets on a marked job.
  */
  .am33_2
  .text
@@ -25,6 +27,9 @@ hl_route:
  beq 1f
  jmp PLAIN_BUILDER
 1:
+ mov (16,a0),d0                   /* flag word: add Soft Focus for this job only */
+ or 0x80,d0
+ mov d0,(16,a0)
  jmp ART_BUILDER
 
 hl_ob:
@@ -105,9 +110,14 @@ hl_marked:
  cmp 0,a0
  beq 1f
  movbu (-11329,a0),d0             /* request = job+11364, so job+35 */
+ btst 3,d0                        /* stage 1..3 */
+ beq 1f
  and 0xf0,d0
  cmp 0xa0,d0
- beq 2f
+ bne 1f
+ movbu (-11348,a0),d0             /* job+16, low byte of the flag word */
+ btst 0x80,d0
+ bne 2f
 1:
  clr d0
  ret [],4

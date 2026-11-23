@@ -28,6 +28,7 @@ TC = Path('/home/hertzel/ep7fw-toolchains/mn10300/bin')
 BIN = ROOT / 'em1mk2/extracted/00_0100_40560020.decoded.bin'
 B = 0x60021020
 END_IMM, OLD_END, NEW_END = 0x60042B6D, 0x612E7000, 0x61300000
+HALO_PAGE_AT = 0x612F0000              # color_creator_wheel's Halo page, the next block in the gap
 CODE_AT = OLD_END
 HOOK, HOOK_STOCK, BACK = 0x6042285E, bytes.fromhex('f82c1c96257761'), 0x60422865
 GETTER, STAGE_KEY = 0x6005E6CF, 0xF709
@@ -85,7 +86,7 @@ def make_edits(force, no_pass):
         assert d[addr - B:addr - B + 2] == WDT_STOCK, f'watchdog site changed at {addr:#x}'
     code, syms = assemble(force, no_pass)
     assert d[CODE_AT - B:CODE_AT + len(code) - B] == b'\xff' * len(code), 'code area not 0xFF'
-    assert CODE_AT + len(code) <= NEW_END
+    assert CODE_AT + len(code) <= HALO_PAGE_AT, 'code runs into the Color Creator Halo page'
     jump = b'\xdc' + struct.pack('<i', syms['hl_entry'] - HOOK) + b'\xcb\xcb'
     route = b'\xdd' + struct.pack('<i', syms['hl_route'] - ROUTE_CALL) + b'\x00\x04'      # regs none, frame 4
     assert len(route) == len(ROUTE_STOCK)
