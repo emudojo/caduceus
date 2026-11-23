@@ -15,6 +15,10 @@ Filter Soft Focus, và ô đó chuyển thẳng sang hàm gốc. Phần mới ch
 
 Vì vậy, chỉ cần nạp một lần là dùng được:
 
+0. **Nên làm nếu chỉ có một máy:** trước tiên nạp `restore/E1259999.BIN`, tức firmware 3.7 chính hãng của OM, không có bản
+   vá. Rủi ro gần như bằng một lần cập nhật chính hãng. Bước này chứng minh trên chính máy bạn rằng thẻ, quy trình nạp và
+   đường quay về đều hoạt động, và rằng tệp 3.7 hiện tại (`691a8a8e…`) chạy tốt. Khởi động và chụp thử một ảnh rồi
+   mới làm bước 1.
 1. Nạp `out/em1mk2-thu-may/4-v0.4c24`.
 2. Kiểm như bước 1: khởi động, chụp và xem ảnh 4:3, 65:24 / 21:9, AF, Color Creator `C1.n`.
 3. **Kiểm đường xử lý mới:** cảnh ban ngày **không có điểm cháy sáng**, tripod, Vivid. Chụp một ảnh với Halo Off và một

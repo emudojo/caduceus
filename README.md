@@ -3,15 +3,16 @@
 **Caduceus for E-M1 II** is a port of [Caduceus](https://github.com/cakelesscoder/caduceus-ep7) (open-source
 firmware patches for the Olympus PEN E-P7) to the **Olympus OM-D E-M1 Mark II on firmware 3.7** (build 3700,
 model 0x1250). It brings Caduceus film looks to the camera's **Color Creator** picture mode, through the same
-colour engine the E-P7 uses, plus **65:24 (XPan)** and **21:9** stills, longer video recording and focus
-stacking with any lens.
+colour engine the E-P7 uses, plus **65:24 (XPan)** and **21:9** stills, longer video recording, focus
+stacking with any lens and **halation** (a tinted glow around highlights, set on a Color Creator **Halo** page).
 
 It reads the **same look format, share codes and card files** as the E-P7 and OM-3 ports, so one look works on
 every body.
 
-**Latest build: v0.4c17** (emulator-checked, not yet camera-tested; see [Status](#status)) · **[Changelog](patches/omdem1mk2/CHANGELOG.md)** ·
+**Latest build: v0.4c24** (emulator-checked, not yet camera-tested; see [Status](#status)) · **[Changelog](patches/omdem1mk2/CHANGELOG.md)** ·
 **[Port notes](docs/PORT_EM1MK2.md)** · **[To-do](current.todo)** ·
-Vietnamese firmware guides: [E-M1 II backup, SD install and restore (HTML)](docs/huong-dan-firmware-em1-ii.html),
+Vietnamese firmware guides: [E-M1 II: what it does, backup, install, using every feature, restore (HTML)](docs/huong-dan-firmware-em1-ii.html),
+[camera test steps for v0.4c24](docs/OMD-EM1-II/thu-may-halation.md),
 [E-M1 II official update with OM Workspace](docs/huong-dan-cap-nhat-firmware-om-workspace.md),
 [PEN E-P7 SD update](docs/huong-dan-cap-nhat-firmware.md)
 
@@ -40,7 +41,9 @@ against stock); **[S]** = static checks only. Details per build: [CHANGELOG](pat
 | Looks from the card (`EM1MOD/LOOKS.BIN`, loaded at the first half-press) (`sd_loader`) | [C] v0.4c15: file loads (`C1.1`); look names / colours from the card still to confirm |
 | 65:24 and 21:9 stills: Shooting Menu, Super Control Panel tile and option row, icons, AF target selector (`aspect`, `aspect_icons`) | [C] v0.4c13 |
 | 65:24 / 21:9 live-view framing, rec-view, RAW+JPEG, power cycle with 6/7 saved, Live Control strip, tracking AF, grid | not tested yet |
-| Halation (global stage over any colour mode) | design + code-space probe only ([plan](docs/OMD-EM1-II/HALATION.md)) |
+| Halation: tinted glow on colour JPEG stills, Off / Low / Med / High on a Color Creator **Halo** page (default Off) (`halation`) | [E] v0.4c24: route, pass (bit-exact against its model at the camera's own image-heap addresses), Halo page, Off = stock capture jobs; not camera-tested ([details](docs/OMD-EM1-II/HALATION.md)) |
+| Watchdog limit 10 s → 30 s, so a long save cannot restart the camera | [E] v0.4c24 |
+| Sharpness as a linear scale (test build `v0.4c19t` only) | [E] |
 | Blacks / Whites, true B&W looks, grain, sharpening off, NR per look | not ported |
 
 **v0.4c16** builds v0.4c15 on the firmware file OM's update server serves today (SHA-256 `691a8a8e…`; v0.4c15 and
@@ -48,6 +51,13 @@ older were built on `f0c25dd8…`). That file loads 2 KiB less of Section 1 at b
 code unloaded, so v0.4c16 adds one edit that loads it again. **v0.4c17** = v0.4c16 plus a Color Creator fix: card
 looks that load after the editor was opened now show their own colours, not the built-in look's. Both passed every
 emulator check [E]; neither has run on a camera yet.
+
+**v0.4c24** = v0.4c17 plus halation and the Color Creator Halo page, and the 30 s watchdog. Halo starts at **Off**: then
+the emulated capture jobs are those of stock (an Art Filter's Soft Focus list names a hook that runs the stock blur), so the camera shoots like v0.4c17 until Halo is turned on, and a halation
+problem is undone by setting Halo back to Off. At boot it adds only the 30 s watchdog and a 100 KB load that the
+camera-tested probe sp1 used (nothing else in the current 3.7 file addresses that memory). Sealed with 21 checks;
+not yet flashed on a camera. Recommended first time: flash the stock restore file once (step 0 in the guides), then
+v0.4c24.
 
 ## Install
 
@@ -61,8 +71,8 @@ and Python 3 on your computer.
    ```bash
    git clone https://github.com/xtruong88/caduceus-em1ii
    cd caduceus-em1ii
-   python3 caduceus.py build --camera em1mk2 --release v0.4c17 --out out/em1mk2-v0.4c17
-   python3 caduceus.py verify out/em1mk2-v0.4c17
+   python3 caduceus.py build --camera em1mk2 --release v0.4c24 --out out/em1mk2-v0.4c24
+   python3 caduceus.py verify out/em1mk2-v0.4c24
    ```
 
 3. **Copy to the SD card:** `DCOLYMP/E1259999.BIN` and (optional, for card looks) `EM1MOD/LOOKS.BIN`.
@@ -85,6 +95,9 @@ and Python 3 on your computer.
   does not list the E-M1 II until the export target is merged upstream.)
 - **Aspect:** Shooting Menu 1 › Image Aspect, or the aspect tile in the Super Control Panel. 65:24 shoots
   5184x1920, 21:9 5184x2224.
+- **Halation:** in the Color Creator editor, INFO to the **Halo** page, Left / Right for Off / Low / Med / High (kept
+  through power-off). It applies to ordinary colour JPEG stills (not Monotone, Art Filters, Art Effects or the special
+  capture modes). A night scene with lights takes a few seconds longer to save.
 
 ## Safety
 
@@ -124,8 +137,10 @@ python3 external/oly_fw_analysis/tools/om_firmware_catalog.py --model-id 1250 --
   --installed 00001000 --download --out cache/catalog     # OM's 3.7 file; copy it to stock_firmware/
 python3 external/oly_fw_analysis/tools/oly_container.py stock_firmware/OLY_E_125_3700_0000_0000.BIN \
   --code-base 0x60021020 --out em1mk2/extracted
-python3 patches/omdem1mk2/color_creator_wheel/build.py   # rebuilds the Color Creator edits v0.4c17 takes
-python3 tools/omdem1mk2_catalog_release.py --stock stock_firmware/OLY_E_125_3700_0000_0000.BIN --version v0.4c17
+python3 patches/omdem1mk2/color_creator_wheel/build.py   # Color Creator edits (edits.json)
+EM1_CC_HALO=1 python3 patches/omdem1mk2/color_creator_wheel/build.py   # the same with the Halo page (edits_halo.json)
+python3 patches/omdem1mk2/halation/build.py               # halation edits (stage from the Halo page)
+python3 tools/omdem1mk2_catalog_release.py --stock stock_firmware/OLY_E_125_3700_0000_0000.BIN --version v0.4c24
                                            # seals on OM's catalog file; runs check_loaded, audit and every emu_* first
 python3 -m unittest tools/test_caduceus_releases.py
 ```
