@@ -23,6 +23,12 @@ Container update package: `E1259999.BIN` (93,050,944 bytes) installed via `DCOLY
   sd_loader build, which is 2 bytes off in the look memory build. It ran only because the flags at that point made the
   stray branch fall through. The halation build now links against the sd_loader build in the spec, and the seal
   refuses a spec where that call misses `p_get`.
+- Review fix, halation (resealed v0.4c22t, v0.4c23t, v0.4c24 and this build): two of the 11 callers of the job
+  constructor leave a stray byte where the halation marker sits (`0x6035d6e4` never writes it; `0x60d19672` copies a
+  byte of another record there). With Halo Off, a stray 0xAx byte could have sent a job down the Art route. Every
+  hook that acts on the marker now also requires its stage to equal the current Halo stage, so **Halo Off is stock
+  for every job**, whatever that byte holds. Emulator: Halo Off with every 0xA0..0xAF goes to the stock builder,
+  `hl_ob` skips the pass, and the combiners stay stock. The opcode audit now also covers the code in the gap.
 - Section 2 and Section 6 are full, so the new code lives in the 100 KB gap the halation patch loads: `.hlui` at
   0x612f0000 for the save, after the Halo page, and `.lmem` at 0x612f0800 for the restore. Build with
   `EM1_LOOKMEM=1` for sd_loader, and with `EM1_CC_HALO=1 EM1_LOOKMEM=1` for color_creator_wheel. The default builds are
