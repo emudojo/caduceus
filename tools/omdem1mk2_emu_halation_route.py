@@ -47,10 +47,14 @@ def load_build():
 def spec_files(spec=None, no_pass=0, setting=False):
     """(patched spec path, symbols): SPEC, or v0.4c17 + the halation edits with the stage fixed at 2 (or, with
     `setting`, read from sid 961)."""
-    hl, syms, _ = load_build().make_edits(0 if setting else STAGE, no_pass)
+    build = load_build()
+    hl, syms, _ = build.make_edits(0 if setting else STAGE, no_pass)
     if spec:
         have = json.load(open(spec))['edits']
         missing = [e['addr'] for e in hl['edits'] if e not in have]
+        if missing:   # a look memory spec: halation is linked against that sd_loader build's p_get
+            hl, syms, _ = build.make_edits(0 if setting else STAGE, no_pass, True)
+            missing = [e['addr'] for e in hl['edits'] if e not in have]
         assert not missing, f'{spec} lacks these halation edits (setting={setting}, no_pass={no_pass}): {missing}'
         return spec, syms
     base = json.load(open(BASE_SPEC))

@@ -232,6 +232,16 @@ def main():
     ed.call(CC.UP)
     assert ed.sid() == 34
     print('card look 1 chosen with the arrows -> 34')
+    ed = Editor(img, fixtures)
+    ed.call(CC.CREATE)
+    for _ in range(5):
+        ed.call(CC.UP)
+    assert ed.sid() == 6
+    assert ed.half_press(pack) == 1 and p16(ed.state, P_INIT) == 1      # chosen look kept, no restore over it
+    ed.call(CC.CREATE)
+    assert ed.call(CC.GUIDE).startswith('Velvia') and p16(ed.state, P_INIT) == 2 and ed.sid() == 33
+    print('built-in look chosen before the card was read: reopening after the card loads switches to card look 0 '
+          'and stores it (33), so the next power-on restores the look on screen')
 
     ed = Editor(img, fixtures, remembered=1 + k)
     ed.set_value(618, 2)

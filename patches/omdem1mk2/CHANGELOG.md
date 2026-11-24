@@ -14,7 +14,15 @@ Container update package: `E1259999.BIN` (93,050,944 bytes) installed via `DCOLY
   with one SetValue(618) of its own value, as the editor's `lv_refresh` does, so live view shows the look at once; the
   camera showed in v0.3b3 that a change to P alone does not redraw it.
 - Not remembered: Strength (back to x1), Chroma (back to 0). A full reset clears the remembered look; the camera then
-  behaves as v0.4c24.
+  behaves as v0.4c24. When the editor switches itself to card look 0 because LOOKS.BIN was read after a built-in look
+  was chosen, that card look is what is remembered.
+- Known limit: the half-press restore (HLS task) and an arrow step (UI task) are not locked against each other. Only a
+  half-press landing inside one arrow step, while a card look is still waiting for the card, can replace that step's
+  choice.
+- Review fix before the camera test: the first v0.4c25t seal linked halation's `p_get` call from the default
+  sd_loader build, which is 2 bytes off in the look memory build. It ran only because the flags at that point made the
+  stray branch fall through. The halation build now links against the sd_loader build in the spec, and the seal
+  refuses a spec where that call misses `p_get`.
 - Section 2 and Section 6 are full, so the new code lives in the 100 KB gap the halation patch loads: `.hlui` at
   0x612f0000 for the save, after the Halo page, and `.lmem` at 0x612f0800 for the restore. Build with
   `EM1_LOOKMEM=1` for sd_loader, and with `EM1_CC_HALO=1 EM1_LOOKMEM=1` for color_creator_wheel. The default builds are

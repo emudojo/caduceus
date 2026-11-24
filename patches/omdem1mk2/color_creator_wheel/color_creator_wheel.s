@@ -1080,8 +1080,9 @@ str_halo_vals:
  *   power-on keeps the remembered look instead of look 0.
  * lm_apply_save: replaces step_film_profile's apply_active_look call (a2 = P); a look chosen with the arrows is
  *   stored in sid 965 as 1 + look + 32 * (card), and P_LMEM stops a later restore from replacing it.
- * Only a choice made with the arrows is stored: cc_init's automatic look 0 is not, so opening the editor before the
- * first half-press (card not read yet) does not forget a remembered card look.
+ * A choice made with the arrows is stored, and so is cc_init's switch to card look 0 once the card is read (lm_ensure).
+ * Its automatic built-in look 0 is not, so opening the editor before the first half-press (card not read yet) does
+ * not forget a remembered card look.
  * ========================================================================= */
 .equ SID_LOOKMEM,  965
     .section .hlui,"ax"
@@ -1091,6 +1092,21 @@ lm_ensure:
     beq 1f
     mov a0,a2
     call look_restore,[d2,d3,a2,a3],20
+    /* cc_init next switches the editor to card look 0 when LOOKS.BIN is loaded and the source is not the card yet
+     * (P_INIT != 2): remember that look, or the next power-on would restore one that is no longer shown. While the
+     * card is not read, nothing is stored, so a remembered card look survives the automatic built-in look 0. */
+    movhu (P_SD_STATE,a2),d0
+    cmp 1,d0
+    bne 2f
+    movhu (P_INIT,a2),d0
+    cmp LOOK_SOURCE_CARD,d0
+    beq 2f
+    mov 1,d0
+    movbu d0,(P_LMEM,a2)
+    mov SID_LOOKMEM,d0
+    mov 1+32,d1                     /* card look 0 */
+    call set_setting_facade,[d2,d3,a2,a3],20
+2:
     mov a2,a0
 1:
     ret [d2,d3,a2,a3],20

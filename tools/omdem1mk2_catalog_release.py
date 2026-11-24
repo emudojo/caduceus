@@ -41,6 +41,8 @@ HALO_PAGE_ADDR = '0x612f0000'             # the Halo page section, in the gap th
 LOOKMEM_WHEEL_EDITS = ROOT / 'patches/omdem1mk2/color_creator_wheel/edits_halo_lookmem.json'
 LOOKMEM_SD_EDITS = ROOT / 'patches/omdem1mk2/sd_loader/edits_lookmem.json'
 LOOKMEM_ADDR = '0x612f0800'               # sd_loader's look memory section (build.py LMEM_ADDR), same gap
+SD_EDITS = ROOT / 'patches/omdem1mk2/sd_loader/edits.json'
+SD_LOADER_CAVE = '0x60580200'
 CAMERA = 'em1mk2'
 CATALOG_SECTION_END = 0x60257000
 ASPECT_SECTION_END = 0x60257800
@@ -115,13 +117,35 @@ def halation_test_spec(spec):
             'edits': [*patch['edits'], *spec['edits']]}
 
 
+def sd_loader_is_lookmem(spec):
+    """Which sd_loader build the spec carries (its cave edit), so code linked against sd_loader (halation's p_get)
+    uses that build's addresses: the look memory build moves them. Refuses a cave that matches neither build."""
+    cave = next(e['new'] for e in spec['edits'] if e['kind'] == '0x100' and e['addr'] == SD_LOADER_CAVE)
+    builds = {}
+    for lookmem, path in ((False, SD_EDITS), (True, LOOKMEM_SD_EDITS)):
+        edits = json.loads(path.read_text(encoding='utf-8'))['edits']
+        builds[lookmem] = next(e['new'] for e in edits if e['addr'] == SD_LOADER_CAVE)
+    matches = [lookmem for lookmem, new in builds.items() if new == cave]
+    if len(matches) != 1:
+        raise ValueError('The sd_loader cave in this spec matches no current sd_loader build: rebuild it')
+    return matches[0]
+
+
 def halo_spec(spec, version):
     """The halation edits built here (HALO_BUILDS[version]) in front of a v0.4c17 spec with the Halo wheel."""
     loader = importlib.util.spec_from_file_location('hl_build', ROOT / 'patches/omdem1mk2/halation/build.py')
     build = importlib.util.module_from_spec(loader)
     loader.loader.exec_module(build)
     stage, no_pass = HALO_BUILDS[version]
-    patch, _, _ = build.make_edits(stage, no_pass)
+    lookmem = sd_loader_is_lookmem(spec)
+    patch, _, _ = build.make_edits(stage, no_pass, lookmem)
+    # hl_flag's `call P_GET` (dd d32) must land on this spec's p_get, never on the other sd_loader build's
+    code_edit = next(e for e in patch['edits'] if int(e['addr'], 16) == build.CODE_AT)
+    code = bytes.fromhex(code_edit['new'])
+    targets = {build.CODE_AT + i + struct.unpack_from('<i', code, i + 1)[0]
+               for i in range(len(code) - 5) if code[i] == 0xDD}
+    if build.p_get(lookmem) not in targets or build.p_get(not lookmem) in targets:
+        raise ValueError("halation's p_get call does not match this spec's sd_loader build")
     return {**spec, 'version': version, 'halation_force_stage': stage, 'halation_no_pass': no_pass,
             'edits': [*patch['edits'], *spec['edits']]}
 

@@ -18,6 +18,8 @@ bật máy. Bản này chỉ dùng để thử: chỉ nạp **sau khi v0.4c24 đ
 - **Look trên thẻ** chỉ được dựng lại sau khi máy đọc xong `LOOKS.BIN`, tức ở lần nhấn nửa cò nạp được thẻ. Nếu thẻ
   không có pack, hoặc pack có ít look hơn số đã nhớ, máy bỏ qua và chạy như v0.4c24.
 - Không nhớ: Strength (luôn về x1), Chroma (về 0).
+- Nếu bạn chọn một look có sẵn trước khi máy đọc thẻ, lần mở trình chỉnh sau khi thẻ đã đọc sẽ tự chuyển sang look
+  đầu tiên trên thẻ (như v0.4c24). Look được nhớ lúc đó là look trên thẻ ấy.
 - Reset toàn bộ máy sẽ xoá look đã nhớ. Khi đó máy chạy như v0.4c24.
 
 ## Đã kiểm trên giả lập
