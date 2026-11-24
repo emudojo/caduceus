@@ -112,8 +112,9 @@ Dựng bằng `caduceus.py build`, rồi kiểm bằng `caduceus.py verify` (ph�
 | `out/em1mk2-thu-may/2-v0.4c22t` | chẩn đoán | `DCOLYMP/`, `EM1MOD/` |
 | `out/em1mk2-thu-may/3-v0.4c23t` | quầng Med | `DCOLYMP/`, `EM1MOD/` |
 | `out/em1mk2-thu-may/4-v0.4c24` | ứng viên | `DCOLYMP/`, `EM1MOD/` |
+| `out/em1mk2-thu-may/5-v0.4c25t` | v0.4c24 + nhớ look, chỉ sau khi v0.4c24 đạt ([thu-may-nho-look.md](thu-may-nho-look.md)) | `DCOLYMP/`, `EM1MOD/` |
 
-Trong mỗi thư mục đều có `restore/E1259999.BIN`. Tệp này giống nhau ở cả bốn thư mục và là firmware gốc. Không chép
+Trong mỗi thư mục đều có `restore/E1259999.BIN`. Tệp này giống nhau ở mọi thư mục và là firmware gốc. Không chép
 `restore/` lên thẻ, trừ khi muốn quay về firmware gốc.
 
 Lệnh kiểm tra lại một thư mục trước khi chép:

@@ -93,7 +93,11 @@ cc_init:
     calls em1_cc_init
     mov d0,d3
 
+.ifdef LOOKMEM
+    call lm_ensure,[d2,d3,a2,a3],20    /* p_ensure, then restore the remembered look (section .hlui) */
+.else
     call p_ensure,[d2,d3,a2,a3],20
+.endif
     cmp 0,a0
     beq 9f
     mov a0,a2
@@ -847,7 +851,11 @@ step_film_profile:
     clr d0
 3:
     movhu d0,(P_LOOK,a2)
+.ifdef LOOKMEM
+    call lm_apply_save,[d2,d3,a2,a3],20  /* apply, then remember it in sid 965 (section .hlui) */
+.else
     call apply_active_look,[d2,d3,a2,a3],20
+.endif
     ret [d2,d3,a2,a3],20
 
 
@@ -1059,4 +1067,47 @@ str_halo:
     .asciz "Halo "
 str_halo_vals:
     .ascii "Off\0\0\0\0\0" "Low\0\0\0\0\0" "Med\0\0\0\0\0" "High\0\0\0\0"
+.endif
+
+.ifdef LOOKMEM
+.if HALO == 0
+.error "EM1_LOOKMEM needs EM1_CC_HALO=1 (its code is in the gap the halation patch loads)"
+.endif
+/* =========================================================================
+ * Look memory (build with EM1_CC_HALO=1 EM1_LOOKMEM=1; sd_loader built with EM1_LOOKMEM=1 first). Section .hlui.
+ * lm_ensure: replaces cc_init's p_ensure call; restores the remembered look (sd_loader look_restore, which ends a
+ *   colour look with the 618 live-view refresh) before cc_init compares the editor source, so opening the editor after
+ *   power-on keeps the remembered look instead of look 0.
+ * lm_apply_save: replaces step_film_profile's apply_active_look call (a2 = P); a look chosen with the arrows is
+ *   stored in sid 965 as 1 + look + 32 * (card), and P_LMEM stops a later restore from replacing it.
+ * Only a choice made with the arrows is stored: cc_init's automatic look 0 is not, so opening the editor before the
+ * first half-press (card not read yet) does not forget a remembered card look.
+ * ========================================================================= */
+.equ SID_LOOKMEM,  965
+    .section .hlui,"ax"
+lm_ensure:
+    call p_ensure,[d2,d3,a2,a3],20
+    cmp 0,a0
+    beq 1f
+    mov a0,a2
+    call look_restore,[d2,d3,a2,a3],20
+    mov a2,a0
+1:
+    ret [d2,d3,a2,a3],20
+
+lm_apply_save:
+    call apply_active_look,[d2,d3,a2,a3],20
+    mov 1,d0
+    movbu d0,(P_LMEM,a2)
+    movhu (P_LOOK,a2),d1
+    and 31,d1
+    movhu (P_INIT,a2),d0
+    cmp LOOK_SOURCE_CARD,d0
+    bne 1f
+    add 32,d1
+1:
+    inc d1
+    mov SID_LOOKMEM,d0
+    call set_setting_facade,[d2,d3,a2,a3],20
+    ret [d2,d3,a2,a3],20
 .endif

@@ -31,10 +31,16 @@ HALO_DIAG_VERSION = 'v0.4c22t'
 HALO_GLOW_VERSION = 'v0.4c23t'
 HALO_RELEASE_VERSION = 'v0.4c24'
 HALO_STAGE = 2
-HALO_BUILDS = {HALO_DIAG_VERSION: (HALO_STAGE, 1), HALO_GLOW_VERSION: (HALO_STAGE, 0), HALO_RELEASE_VERSION: (0, 0)}
+# Look memory: v0.4c24 + the remembered look (sid 965), camera test only. Its code is in the same gap as the Halo page.
+LOOKMEM_VERSION = 'v0.4c25t'
+HALO_BUILDS = {HALO_DIAG_VERSION: (HALO_STAGE, 1), HALO_GLOW_VERSION: (HALO_STAGE, 0), HALO_RELEASE_VERSION: (0, 0),
+               LOOKMEM_VERSION: (0, 0)}
 WHEEL_EDITS = ROOT / 'patches/omdem1mk2/color_creator_wheel/edits.json'
 HALO_WHEEL_EDITS = ROOT / 'patches/omdem1mk2/color_creator_wheel/edits_halo.json'
 HALO_PAGE_ADDR = '0x612f0000'             # the Halo page section, in the gap the halation edits make Section 6 load
+LOOKMEM_WHEEL_EDITS = ROOT / 'patches/omdem1mk2/color_creator_wheel/edits_halo_lookmem.json'
+LOOKMEM_SD_EDITS = ROOT / 'patches/omdem1mk2/sd_loader/edits_lookmem.json'
+LOOKMEM_ADDR = '0x612f0800'               # sd_loader's look memory section (build.py LMEM_ADDR), same gap
 CAMERA = 'em1mk2'
 CATALOG_SECTION_END = 0x60257000
 ASPECT_SECTION_END = 0x60257800
@@ -171,6 +177,8 @@ def validate(spec_path, version):
             run('emu_spare_setting', spec_path)
         if not no_pass:
             run('emu_halation_pass')
+    if version == LOOKMEM_VERSION:
+        run('emu_look_memory', spec_path)
     # Both releases preserve the camera-tested v0.4c15 aspect assets byte for byte.
     run('emu_scp', spec_path, '--reference', ROOT / 'releases' / CAMERA / BASE_RELEASE / 'edits.json')
     return sorted(set(checked))
@@ -188,7 +196,10 @@ def seal(stock_path, version):
     spec = catalog_spec(legacy, main)
     if version in (COLOR_CREATOR_VERSION, HALATION_TEST_VERSION, SHARP_TEST_VERSION):
         spec = replace_color_creator_edits(spec)
-    if version in HALO_BUILDS:
+    if version == LOOKMEM_VERSION:
+        spec = replace_color_creator_edits(spec, LOOKMEM_WHEEL_EDITS, (HALO_PAGE_ADDR,))
+        spec = halo_spec(replace_color_creator_edits(spec, LOOKMEM_SD_EDITS, (LOOKMEM_ADDR,)), version)
+    elif version in HALO_BUILDS:
         spec = halo_spec(replace_color_creator_edits(spec, HALO_WHEEL_EDITS, (HALO_PAGE_ADDR,)), version)
     if version == HALATION_TEST_VERSION:
         spec = halation_test_spec(spec)

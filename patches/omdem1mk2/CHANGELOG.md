@@ -5,6 +5,32 @@ Container update package: `E1259999.BIN` (93,050,944 bytes) installed via `DCOLY
 
 ---
 
+## v0.4c25t — 2026-11-24 (look memory camera-test build; emulator-checked, not camera-tested)
+
+- v0.4c24 plus one feature: **the Color Creator look survives power-off.** A look chosen with the arrows in the editor
+  is stored in sid 965 (property 0xF719 index 1, a setting this body never uses) as `1 + look + 32 × card`. After
+  power-on, the first half-press, or opening the editor if that comes first, rebuilds the look in RAM. A card look waits
+  until LOOKS.BIN is read. Tone and vividness are stock settings the camera already keeps. A restored colour look ends
+  with one SetValue(618) of its own value, as the editor's `lv_refresh` does, so live view shows the look at once; the
+  camera showed in v0.3b3 that a change to P alone does not redraw it.
+- Not remembered: Strength (back to x1), Chroma (back to 0). A full reset clears the remembered look; the camera then
+  behaves as v0.4c24.
+- Section 2 and Section 6 are full, so the new code lives in the 100 KB gap the halation patch loads: `.hlui` at
+  0x612f0000 for the save, after the Halo page, and `.lmem` at 0x612f0800 for the restore. Build with
+  `EM1_LOOKMEM=1` for sd_loader, and with `EM1_CC_HALO=1 EM1_LOOKMEM=1` for color_creator_wheel. The default builds are
+  byte-identical to before.
+- Emulator: every v0.4c24 check, plus `emu_look_memory`, which covers:
+  - sid 965 through the real settings store (0..64, the three boot reset paths, neighbours untouched);
+  - the half-press restore of built-in, card and mono looks, a card that is late, missing or too short, and
+    invalid values;
+  - the editor save and restore;
+  - that a colour restore makes exactly one SetValue, 618 rewritten with its stored value, and changes no stored
+    setting, while mono, skipped and invalid cases make none;
+  - that stock and v0.4c24 ignore sid 965.
+- Not emulated: the flash write at power-off; the live-view redraw itself, and the 618 write from the half-press
+  (HLS) task, which stock code may never do. Its post-set notifier only posts a message. Camera test:
+  `docs/OMD-EM1-II/thu-may-nho-look.md`.
+
 ## v0.4c24 — 2026-11-23 (halation release candidate; emulator-checked, not camera-tested)
 
 - v0.4c23t with the strength taken from the Color Creator **Halo** page (Off / Low / Med / High, sid 961). It starts at
