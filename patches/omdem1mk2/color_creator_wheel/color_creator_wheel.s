@@ -127,8 +127,9 @@ cc_init:
     movhu (P_INIT,a2),d0
     cmp d1,d0
     beq 1f
-    movhu d1,(P_INIT,a2)
     clr d0
+    movbu d0,(P_ACTIVE,a2)          /* off first: the colour stage and look WB read P_INIT / P_LOOK while it is on */
+    movhu d1,(P_INIT,a2)
     movhu d0,(P_LOOK,a2)
     call apply_active_look,[d2,d3,a2,a3],20
     bra 2f
@@ -850,6 +851,8 @@ step_film_profile:
     bcs 3f
     clr d0
 3:
+    clr d1
+    movbu d1,(P_ACTIVE,a2)          /* off first: a capture must not pair the old look's state with the new P_LOOK */
     movhu d0,(P_LOOK,a2)
 .ifdef LOOKMEM
     call lm_apply_save,[d2,d3,a2,a3],20  /* apply, then remember it in sid 965 (section .hlui) */
