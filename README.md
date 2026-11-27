@@ -2,6 +2,34 @@
 
 **English** · **[Tiếng Việt](README.vi.md)**
 
+## Quick start
+
+Use an **Olympus OM-D E-M1 Mark II on official firmware 3.7**. Charge the battery and back up the camera settings
+and SD card before you start. [Backup and installation guide](docs/huong-dan-firmware-em1-ii.md#sao-luu)
+
+1. Download `caduceus-build.exe` for 64-bit Windows, or `caduceus-em1mk2-source.zip` for the Python launchers.
+   [Downloads for em1mk2-v0.4c24](https://github.com/xtruong88/caduceus-em1ii/releases/tag/em1mk2-v0.4c24)
+2. Make sure the installer is in a writable folder and double-click the EXE. For the ZIP, install Python 3.10+,
+   extract everything, then double-click `Build Caduceus (Windows).bat` or `Build Caduceus (Mac).command`.
+   On Linux, run `build-caduceus-linux.sh` in a terminal.
+3. For the first download, read the OM Digital Solutions licence shown by the builder and type `yes` if you
+   accept. The builder verifies the official 3.7 firmware and writes the v0.4c24 package to
+   `out/em1mk2-v0.4c24/` beside the installer.
+4. Insert the SD card, check the drive shown, and confirm the copy. The card must have a `DCIM` folder.
+   If the card is missed, copy the files yourself. [SD card instructions](docs/huong-dan-firmware-em1-ii.md#chep-the)
+5. Eject the card, put it in **slot 1** with the camera off, then hold **OK** while switching on. Leave the camera
+   alone while the LED is steady. A regular blink about twice a second means the update is finished. The guide
+   explains the recommended first flash of stock 3.7 and how to restore it later.
+   [Flash and restore instructions](docs/huong-dan-firmware-em1-ii.md#nap)
+
+Windows SmartScreen may flag the unsigned EXE. The ZIP and Python launcher are also available. Compare the
+download's SHA-256 against the `SHA256SUMS` file on the release page.
+
+| Build | Installation |
+|---|---|
+| **v0.4c24** | Recommended default. Halation starts Off. Verified in the emulator and awaiting camera testing. |
+| v0.4c25t / v0.4c26t / v0.4c27t | Camera-test builds. Select one explicitly with `--release`. |
+
 **Caduceus for E-M1 II** is a port of [Caduceus](https://github.com/cakelesscoder/caduceus-ep7) (open-source
 firmware patches for the Olympus PEN E-P7) to the **Olympus OM-D E-M1 Mark II on firmware 3.7** (build 3700,
 model 0x1250). It brings Caduceus film looks to the camera's **Color Creator** picture mode, through the same
@@ -11,8 +39,8 @@ stacking with any lens and **halation** (a tinted glow around highlights, set on
 It reads the **same look format, share codes and card files** as the E-P7 and OM-3 ports, so one look works on
 every body.
 
-**Public beta: testers wanted.** Three builds are ready, each adding one feature to the one before; none has run
-on a camera yet. **[Become a tester](#become-a-tester)** · **[Changelog](patches/omdem1mk2/CHANGELOG.md)** ·
+**Public beta: testers wanted.** v0.4c24 and the three later test builds are awaiting camera testing.
+**[Become a tester](#become-a-tester)** · **[Changelog](patches/omdem1mk2/CHANGELOG.md)** ·
 **[Port notes](docs/PORT_EM1MK2.md)** ·
 Vietnamese guides: what it does, backup, install, every feature, restore ([Markdown](docs/huong-dan-firmware-em1-ii.md) ·
 [HTML](docs/huong-dan-firmware-em1-ii.html)) ·
@@ -81,11 +109,17 @@ the one before worked on your camera.
 what happened (works / odd / froze), and the JPEGs the guide asks for. A freeze or failed boot is the most useful
 report: say exactly what you pressed last.
 
-## Install
+<a id="install"></a>
+
+## Advanced installation
 
 You need: an E-M1 Mark II on firmware **3.7** (Setup › Firmware), a **full battery**, an SD card in **slot 1**,
-and **Python 3** on your computer (Windows: [python.org](https://www.python.org/downloads/), tick
+and **Python 3.10+** on your computer (Windows: [python.org](https://www.python.org/downloads/), tick
 "Add python.exe to PATH"). No compiler or other tool is needed.
+
+To specify the card in one-press mode, use `caduceus-build.exe --sd E:`, replacing `E:` with your drive.
+The Python launchers accept the same option. For automated downloads, use `--accept-license` only after reading
+and accepting the OM licence.
 
 1. **Update to official 3.7 first** if the camera shows an older version (OM Workspace; see the Vietnamese guide above).
 2. **Get this repository:** `git clone https://github.com/xtruong88/caduceus-em1ii`, or download the

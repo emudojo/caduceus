@@ -76,8 +76,8 @@ Phía máy tính, repo có:
   3.7, cập nhật bản chính hãng trước bằng OM Workspace ([hướng dẫn](huong-dan-cap-nhat-firmware-om-workspace.md)).
 - **Pin sạc đầy**, tốt nhất thêm một pin dự phòng.
 - **Thẻ SD** máy đã đọc được, lắp ở **khe 1** khi nạp.
-- **Máy tính** có [Python 3.10 trở lên](https://www.python.org/downloads/) (trên Windows, tích “Add python.exe to PATH” khi
-  cài) và bản sao repo này.
+- **Máy tính** Windows 64 bit để chạy EXE, hoặc máy có [Python 3.10 trở lên](https://www.python.org/downloads/) để
+  dùng gói ZIP. Trên Windows, tích “Add python.exe to PATH” khi cài Python.
 - Cáp USB và **OM Workspace** để sao lưu cài đặt máy (không bắt buộc nhưng nên làm).
 
 <a id="sao-luu"></a>
@@ -109,6 +109,16 @@ máy bạn.
 
 ## 5. Tạo gói firmware trên máy tính
 
+1. Tải `caduceus-build.exe` cho Windows 64 bit hoặc `caduceus-em1mk2-source.zip`. [Trang tải v0.4c24](https://github.com/xtruong88/caduceus-em1ii/releases/tag/em1mk2-v0.4c24)
+2. Đặt EXE trong thư mục có quyền ghi rồi nhấp đúp. Với ZIP, giải nén toàn bộ và nhấp đúp `Build Caduceus (Windows).bat`
+   hoặc `Build Caduceus (Mac).command`. Trên Linux, chạy `build-caduceus-linux.sh` trong Terminal.
+3. Đọc giấy phép OM Digital Solutions và gõ `yes` nếu đồng ý. Sau khi tải tệp 3.7 gốc, builder kiểm hash rồi tạo gói
+   **v0.4c24** trong `out/em1mk2-v0.4c24/` cạnh chương trình. Nếu đã có tệp OM đúng hash, builder dùng tệp đó.
+
+SmartScreen có thể hiện cảnh báo vì EXE chưa ký. Bạn có thể dùng ZIP và launcher Python.
+
+### Dùng dòng lệnh
+
 Mở PowerShell (Windows) hoặc Terminal (macOS/Linux) trong thư mục repo, nơi có `caduceus.py`. Trên macOS/Linux, thay
 `python` bằng `python3` nếu cần.
 
@@ -117,7 +127,7 @@ python caduceus.py build --camera em1mk2 --release v0.4c24 --out out/em1mk2-v0.4
 python caduceus.py verify out/em1mk2-v0.4c24
 ```
 
-- Lệnh `build` tải tệp 3.7 từ máy chủ OM. Nếu đã có tệp đúng hash, thêm
+- Lệnh `build` hỏi đồng ý giấy phép trước khi tải tệp 3.7 từ máy chủ OM. Nếu đã có tệp đúng hash, thêm
   `--stock "đường-dẫn\OLY_E_125_3700_0000_0000.BIN"`.
 - Thư mục `--out` phải mới hoặc trống.
 - Bản thử: thay `v0.4c24` bằng `v0.4c25t`, `v0.4c26t` hoặc `v0.4c27t` ở cả hai lệnh (và đổi tên thư mục `--out`). Chỉ nạp bản sau
@@ -137,6 +147,10 @@ python caduceus.py verify out/em1mk2-v0.4c24
 <a id="chep-the"></a>
 
 ## 6. Chép lên thẻ SD
+
+Chế độ cài nhanh tìm thẻ có thư mục `DCIM`. Đối chiếu đúng ổ rồi xác nhận chép. Builder kiểm lại hash sau khi
+chép tệp cài và giữ pack look có định dạng hợp lệ trên thẻ. Nếu không tự nhận diện được thẻ, có thể chỉ định ổ
+bằng `caduceus-build.exe --sd E:` (thay `E:` bằng ổ của bạn) hoặc chép tay theo các bước dưới đây.
 
 1. Cắm thẻ vào máy tính, mở **gốc thẻ** (cùng cấp với `DCIM/`).
 2. Tạo thư mục `DCOLYMP` nếu chưa có. Chuyển các tệp cập nhật cũ trong đó ra máy tính.
@@ -164,6 +178,8 @@ Sau đó Eject rồi rút thẻ.
 <a id="nap"></a>
 
 ## 7. Nạp firmware vào máy
+
+Nếu đã dùng builder để chép thẻ, vẫn kiểm tra trong `DCOLYMP/` chỉ có đúng tệp cập nhật cần nạp.
 
 > [!TIP]
 > **Bước 0, nên làm nếu bạn chỉ có một máy:** nạp `restore/E1259999.BIN` trước. Tệp này là firmware 3.7 chính hãng của
