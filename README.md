@@ -14,7 +14,8 @@ every body.
 **Public beta: testers wanted.** Three builds are ready, each adding one feature to the one before; none has run
 on a camera yet. **[Become a tester](#become-a-tester)** · **[Changelog](patches/omdem1mk2/CHANGELOG.md)** ·
 **[Port notes](docs/PORT_EM1MK2.md)** ·
-Vietnamese guides: [what it does, backup, install, every feature, restore (HTML)](docs/huong-dan-firmware-em1-ii.html),
+Vietnamese guides: what it does, backup, install, every feature, restore ([Markdown](docs/huong-dan-firmware-em1-ii.md) ·
+[HTML](docs/huong-dan-firmware-em1-ii.html)) ·
 [official 3.7 update with OM Workspace](docs/huong-dan-cap-nhat-firmware-om-workspace.md)
 
 > [!WARNING]
