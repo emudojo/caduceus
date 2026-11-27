@@ -41,6 +41,7 @@ against stock); **[S]** = static checks only. Details per build: [CHANGELOG](pat
 | Watchdog limit 10 s → 30 s, so a long save cannot restart the camera | [E] v0.4c24 |
 | Look memory: the Color Creator look survives power-off (`sd_loader`, `color_creator_wheel`) | [E] test build v0.4c25t |
 | WB shift per look (A-B / G-M from the look; CWB and other modes stay stock) (`look_wb`) | [E] test build v0.4c26t, including the capture WB block run natively ([test steps](docs/OMD-EM1-II/thu-may-look-wb.md)) |
+| Colour wheel: a Color Creator **Wheel** page draws the look on the camera's 12-sector colour wheel; Down or TRASH steps S / H / L; display only (`color_wheel`, `color_creator_wheel`) | [E] test build v0.4c27t; not camera-tested ([test steps](docs/OMD-EM1-II/thu-may-color-wheel.md)) |
 | Sharpness as a linear scale (test build `v0.4c19t` only) | [E] |
 | Blacks / Whites, true B&W looks, grain, sharpening off, NR per look | not ported |
 
@@ -58,8 +59,9 @@ not yet flashed on a camera. Recommended first time: flash the stock restore fil
 v0.4c24.
 
 **v0.4c25t** = v0.4c24 plus look memory (sid 965). **v0.4c26t** = v0.4c25t plus WB shift per look, and the editor now
-switches the look off before it changes it, so no capture pairs one look's state with another's. Both are camera-test
-builds sealed with every check of the build before plus their own harness.
+switches the look off before it changes it, so no capture pairs one look's state with another's. **v0.4c27t** =
+v0.4c26t plus the colour wheel page (display only: no setting or capture changes). All three are camera-test builds
+sealed with every check of the build before plus their own harness.
 
 ## Become a tester
 
@@ -73,6 +75,7 @@ the one before worked on your camera.
 | 1 | **v0.4c24** | halation (Halo page, starts Off), 30 s watchdog, on top of looks / XPan / 21:9 / 9 h video / focus stacking | [thu-may-halation.md](docs/OMD-EM1-II/thu-may-halation.md) |
 | 2 | **v0.4c25t** | the Color Creator look is remembered after power-off | [thu-may-nho-look.md](docs/OMD-EM1-II/thu-may-nho-look.md) |
 | 3 | **v0.4c26t** | each colour look's WB shift is applied (five built-in looks change colour: Nostalgic, Gold 200, Kodachrome64, Portra 400, CineStill800) | [thu-may-look-wb.md](docs/OMD-EM1-II/thu-may-look-wb.md) |
+| 4 | **v0.4c27t** | a Color Creator Wheel page shows the look on the colour wheel (Down / TRASH: S, H, L); display only | [thu-may-color-wheel.md](docs/OMD-EM1-II/thu-may-color-wheel.md) |
 
 **Report** each step in an [issue](https://github.com/xtruong88/caduceus-em1ii/issues): build name, what you did,
 what happened (works / odd / froze), and the JPEGs the guide asks for. A freeze or failed boot is the most useful
@@ -96,8 +99,9 @@ and **Python 3** on your computer (Windows: [python.org](https://www.python.org/
    py caduceus.py verify out/em1mk2-thu-may/4-v0.4c24
    ```
 
-   For the next steps use `--release v0.4c25t --out out/em1mk2-thu-may/5-v0.4c25t` and
-   `--release v0.4c26t --out out/em1mk2-thu-may/6-v0.4c26t`: the test guides use these folder names.
+   For the next steps use `--release v0.4c25t --out out/em1mk2-thu-may/5-v0.4c25t`,
+   `--release v0.4c26t --out out/em1mk2-thu-may/6-v0.4c26t` and
+   `--release v0.4c27t --out out/em1mk2-thu-may/7-v0.4c27t`: the test guides use these folder names.
 
    `verify` must end with "All good". Already have OM's file (`OLY_E_125_3700_0000_0000.BIN`)? Add
    `--stock <path to it>` to `build`.

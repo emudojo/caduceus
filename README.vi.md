@@ -41,6 +41,7 @@ với bản gốc); **[S]** = chỉ kiểm tĩnh. Chi tiết từng bản: [CHAN
 | Watchdog 10 giây → 30 giây, để lưu ảnh lâu không làm máy khởi động lại | [E] v0.4c24 |
 | Nhớ look: look Color Creator vẫn giữ sau khi tắt máy (`sd_loader`, `color_creator_wheel`) | [E] bản thử v0.4c25t |
 | WB shift theo look (A-B / G-M lấy từ look; CWB và các mode khác giữ như gốc) (`look_wb`) | [E] bản thử v0.4c26t, gồm cả khối WB lúc chụp chạy thật trên giả lập ([các bước thử](docs/OMD-EM1-II/thu-may-look-wb.md)) |
+| Vòng màu: trang **Wheel** trong Color Creator vẽ look lên vòng màu 12 ô của máy; nút xuống hoặc TRASH đổi S / H / L; chỉ hiển thị (`color_wheel`, `color_creator_wheel`) | [E] bản thử v0.4c27t; chưa thử trên máy ([các bước thử](docs/OMD-EM1-II/thu-may-color-wheel.md)) |
 | Sharpness dạng thang tuyến tính (chỉ bản thử `v0.4c19t`) | [E] |
 | Blacks / Whites, look B&W thật, grain, tắt làm nét, NR theo look | chưa port |
 
@@ -57,8 +58,9 @@ về Off là xong. Lúc khởi động nó chỉ thêm watchdog 30 giây và m�
 file khôi phục gốc một lần (bước 0 trong hướng dẫn), rồi mới nạp v0.4c24.
 
 **v0.4c25t** = v0.4c24 cộng nhớ look (sid 965). **v0.4c26t** = v0.4c25t cộng WB shift theo look, và trình chỉnh giờ tắt
-look trước khi đổi look, để không tấm chụp nào ghép trạng thái của look này với look khác. Cả hai là bản thử trên máy,
-seal với mọi bước kiểm của bản trước cộng harness riêng của nó.
+look trước khi đổi look, để không tấm chụp nào ghép trạng thái của look này với look khác. **v0.4c27t** = v0.4c26t cộng
+trang vòng màu (chỉ hiển thị: không đổi setting hay ảnh chụp). Cả ba là bản thử trên máy, seal với mọi bước kiểm của bản
+trước cộng harness riêng của nó.
 
 ## Tham gia thử
 
@@ -72,6 +74,7 @@ trên máy bạn.
 | 1 | **v0.4c24** | halation (trang Halo, mặc định Off), watchdog 30 giây, trên nền look / XPan / 21:9 / video 9 giờ / focus stacking | [thu-may-halation.md](docs/OMD-EM1-II/thu-may-halation.md) |
 | 2 | **v0.4c25t** | look Color Creator được nhớ sau khi tắt máy | [thu-may-nho-look.md](docs/OMD-EM1-II/thu-may-nho-look.md) |
 | 3 | **v0.4c26t** | áp WB shift của từng look màu (năm look có sẵn đổi màu: Nostalgic, Gold 200, Kodachrome64, Portra 400, CineStill800) | [thu-may-look-wb.md](docs/OMD-EM1-II/thu-may-look-wb.md) |
+| 4 | **v0.4c27t** | trang Wheel trong Color Creator hiện look trên vòng màu (nút xuống / TRASH: S, H, L); chỉ hiển thị | [thu-may-color-wheel.md](docs/OMD-EM1-II/thu-may-color-wheel.md) |
 
 **Báo kết quả** từng bước trong [Issues](https://github.com/xtruong88/caduceus-em1ii/issues): tên bản, bạn đã làm gì,
 kết quả ra sao (chạy tốt / có gì lạ / treo), và các ảnh JPEG mà hướng dẫn yêu cầu. Báo treo máy hoặc không khởi động
@@ -95,8 +98,9 @@ trình biên dịch hay công cụ nào khác.
    py caduceus.py verify out/em1mk2-thu-may/4-v0.4c24
    ```
 
-   Ở các bước sau dùng `--release v0.4c25t --out out/em1mk2-thu-may/5-v0.4c25t` và
-   `--release v0.4c26t --out out/em1mk2-thu-may/6-v0.4c26t`: các hướng dẫn thử dùng đúng tên thư mục này.
+   Ở các bước sau dùng `--release v0.4c25t --out out/em1mk2-thu-may/5-v0.4c25t`,
+   `--release v0.4c26t --out out/em1mk2-thu-may/6-v0.4c26t` và
+   `--release v0.4c27t --out out/em1mk2-thu-may/7-v0.4c27t`: các hướng dẫn thử dùng đúng tên thư mục này.
 
    `verify` phải kết thúc bằng `All good.`. Nếu đã có sẵn file của OM (`OLY_E_125_3700_0000_0000.BIN`), thêm
    `--stock <đường dẫn tới file>` vào lệnh `build`.
