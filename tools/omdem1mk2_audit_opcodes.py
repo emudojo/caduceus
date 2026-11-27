@@ -100,11 +100,12 @@ def audit_code(name, vma, code_bytes, stop_addr=None, allow_mul_div=False):
 # mul/div are banned because they overwrite MDR, which a hook leaving by `retf` needs. Halation's mul is in hl_ob
 # (entered from the Soft Focus work list; it calls hl_pass, which resets MDR, then jumps to the stock blur, which
 # leaves by `ret`) and in hl_pass's pixel loops (left by `ret`); hl_flag, the converter hook every still passes, has
-# none. Halo page, look memory and the AF stubs allow none.
+# none. Halo page, look memory, look WB and the AF stubs allow none.
 GAP_CODE = (
     ('halation', '0x612e7000', True),
     ('halo_page_and_lookmem_save', '0x612f0000', False),
     ('lookmem_restore', '0x612f0800', False),
+    ('look_wb', '0x612f1000', False),
     ('aspect_af_stubs', '0x605d2ec0', False),
 )
 
