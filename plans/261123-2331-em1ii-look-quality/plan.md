@@ -15,7 +15,7 @@ Năm tính năng người dùng yêu cầu, xếp theo **giá trị / rủi ro**
 |---|---|---|---|---|---|
 | [00](phase-00-format-proposal.md) | Đề xuất mở rộng format chung (contrast, sharpness, mono filter, grain) | P1 | thấp (chỉ là đề xuất) | — | pending |
 | [01](phase-01-remember-look.md) | Nhớ look sau khi tắt máy, áp ngay không cần mở trình chỉnh | P1 | thấp–vừa | baseline máy | emulator xong (v0.4c25t), chờ máy |
-| [02](phase-02-look-white-balance.md) | WB shift theo look (A-B, G-M; field đã có trong pack) | P1 | vừa | 01 | pending |
+| [02](phase-02-look-white-balance.md) | WB shift theo look (A-B, G-M; field đã có trong pack) | P1 | vừa | 01 | emulator xong (v0.4c26t), chờ máy |
 | [03](phase-03-true-mono.md) | B&W thật cho look đơn sắc (Acros, Tri-X) | P2 | vừa–cao | 00 (filter), 01 | pending |
 | [04](phase-04-look-contrast-sharpness.md) | Tương phản và độ nét theo look | P2 | vừa | 00, 01; `sharp_scale` thử riêng trước | pending |
 | [05](phase-05-grain.md) | Grain (hạt phim), có thể cắt | P3 | **cao** | 00; bản nền ổn định trên máy | pending |
