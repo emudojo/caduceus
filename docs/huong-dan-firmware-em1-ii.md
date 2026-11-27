@@ -1,6 +1,7 @@
 # Hướng dẫn Caduceus cho E-M1 Mark II
 
-Olympus OM-D E-M1 Mark II · nền firmware chính hãng 3.7 (build 3700) · bản nên dùng: **v0.4c24**.
+Olympus OM-D E-M1 Mark II · nền firmware chính hãng 3.7 (build 3700) · bản nên dùng: **v0.4c24** · bản thử: **v0.4c25t** (nhớ look),
+**v0.4c26t** (WB theo look).
 Trang này dành cho người mới: Caduceus là gì, cách sao lưu, cách nạp, cách dùng từng tính năng trên máy và cách quay về
 firmware gốc.
 
@@ -36,7 +37,9 @@ Máy nạp tệp như một bản cập nhật bình thường, qua thẻ SD, b�
 > - vùng nhớ mới không xung đột với firmware gốc;
 > - ở Halo Off, việc chụp ảnh đi đúng đường của firmware gốc.
 >
-> v0.4c24 **chưa được nạp vào máy thật**. Hãy làm đúng các bước sao lưu bên dưới.
+> v0.4c24 **chưa được nạp vào máy thật**. Hai bản thử v0.4c25t (thêm nhớ look) và v0.4c26t (thêm WB theo look) cũng đã
+> qua mọi bước kiểm của bản trước cộng phần kiểm riêng, và cũng chưa nạp vào máy thật. Hãy làm đúng các bước sao lưu bên
+> dưới.
 
 <a id="tinh-nang"></a>
 
@@ -53,6 +56,8 @@ Nhãn: ✅ đã chạy trên máy · 🧪 kiểm trên giả lập · ⏳ chưa 
 | Tỷ lệ 65:24 và 21:9 | Ảnh toàn cảnh 5184×1920 và 5184×2224, có trong Shooting Menu, Super Control Panel, chọn điểm AF. | ✅ v0.4c13 |
 | Halation (quầng sáng) | Quầng màu quanh điểm sáng trên ảnh JPEG màu; chỉnh Off/Low/Med/High ở trang Halo. | 🧪 v0.4c24 · ⏳ chưa thử trên máy |
 | Watchdog 30 s | Máy chờ 30 s thay vì 10 s trước khi tự khởi động lại, để ảnh có quầng kịp lưu. | 🧪 v0.4c22t+ |
+| Nhớ look | Look đã chọn trong Color Creator được giữ sau khi tắt máy và tự áp lại ở lần nhấn nửa cò đầu. | 🧪 bản thử v0.4c25t · ⏳ chưa thử trên máy |
+| WB theo look | Look màu áp WB shift (A-B, G-M) của riêng nó thay cho fine-tune WB của bạn; CWB và các mode khác giữ nguyên. | 🧪 bản thử v0.4c26t · ⏳ chưa thử trên máy |
 | Sharpness tuyến tính | −2..+2 thành tắt / 25 / 50 / 75 / 100 %. Chỉ có trong bản thử riêng `v0.4c19t`, không có trong v0.4c24. | 🧪 bản thử |
 | Chưa có | B&W thật (look đơn sắc chỉ giảm độ bão hoà), Blacks/Whites, grain, tắt sharpening, NR theo look. | ⏳ chưa port |
 
@@ -114,6 +119,8 @@ python caduceus.py verify out/em1mk2-v0.4c24
 - Lệnh `build` tải tệp 3.7 từ máy chủ OM. Nếu đã có tệp đúng hash, thêm
   `--stock "đường-dẫn\OLY_E_125_3700_0000_0000.BIN"`.
 - Thư mục `--out` phải mới hoặc trống.
+- Bản thử: thay `v0.4c24` bằng `v0.4c25t` hoặc `v0.4c26t` ở cả hai lệnh (và đổi tên thư mục `--out`). Chỉ nạp bản sau
+  khi bản trước đã chạy tốt.
 - Chỉ dùng gói khi `verify` báo **All good.** và có dòng khớp `releases/em1mk2/v0.4c24/SHA256SUMS`.
 
 | Tệp | Đường dẫn | Dùng làm gì |
@@ -283,6 +290,31 @@ Chi tiết: [quy trình thử trên máy](OMD-EM1-II/thu-may-halation.md) ·
 - **Focus stacking:** bật như bình thường trong menu Focus Bracketing / Focus Stacking. Giờ dùng được với ống AF bất kỳ
   (ống Olympus thường, Panasonic, Sigma…), không chỉ ống PRO.
 
+<a id="nho-look"></a>
+
+### 9.7 Nhớ look sau khi tắt máy (bản thử v0.4c25t)
+
+- Chọn look bằng mũi tên trong trình chỉnh Color Creator như thường. Máy ghi lại look đó.
+- Sau khi bật máy, **lần nhấn nửa cò đầu tiên** áp lại look (hoặc lúc mở trình chỉnh, nếu bạn mở trước). Look trên thẻ
+  chỉ được áp lại sau khi máy đọc xong `LOOKS.BIN`.
+- Không nhớ: Strength (về x1) và Chroma (về 0). Reset toàn bộ máy sẽ xoá look đã nhớ.
+
+Các bước thử: [thu-may-nho-look.md](OMD-EM1-II/thu-may-nho-look.md).
+
+<a id="wb-look"></a>
+
+### 9.8 WB theo look (bản thử v0.4c26t)
+
+- Look màu có ghi WB shift (A-B, G-M, từ −7 đến +7) sẽ dùng giá trị đó thay cho fine-tune WB bạn đã đặt, khi chụp ở
+  Color Creator. Menu WB vẫn hiện giá trị của bạn, không bị ghi đè.
+- **Giữ nguyên:** CWB (đặt nhiệt độ màu bằng Kelvin), các picture mode khác, look đơn sắc, look không có WB shift, và RAW
+  xử lý trong máy.
+- Năm look có sẵn mang WB shift nên màu JPEG sẽ khác v0.4c25t: Nostalgic A-B +3, Gold 200 +2, Kodachrome 64 +1, Portra
+  400 +1, CineStill 800 −3.
+- Live view có thể không hiện WB shift (trên E-P7 cũng vậy), chỉ ảnh JPEG có.
+
+Các bước thử: [thu-may-look-wb.md](OMD-EM1-II/thu-may-look-wb.md).
+
 <a id="khoi-phuc"></a>
 
 ## 10. Quay về firmware gốc hoặc bản cũ
@@ -334,7 +366,8 @@ thấy, gửi ảnh mẫu kèm thông số.
 <details><summary>Tôi có cần nạp lần lượt nhiều bản không?</summary>
 
 Không. Với người dùng, nạp **một lần v0.4c24** là đủ. Các bản thử từng bước (v0.4c17 → v0.4c22t → v0.4c23t) chỉ dùng khi
-cần tìm phần nào gây lỗi.
+cần tìm phần nào gây lỗi. Nếu muốn thử tính năng mới, đi lần lượt v0.4c24 → v0.4c25t → v0.4c26t, mỗi bản chỉ nạp khi bản
+trước đã chạy tốt.
 
 </details>
 
@@ -352,6 +385,8 @@ Bình thường: Caduceus giữ nguyên số phiên bản. Hãy kiểm tra bằn
 | Bản | Dùng khi nào |
 |---|---|
 | **v0.4c24** | **Nên dùng.** Mọi tính năng ở mục 2 cộng halation, Halo mặc định Off. |
+| v0.4c25t | Bản thử: v0.4c24 cộng nhớ look. Nạp sau khi v0.4c24 chạy tốt. |
+| v0.4c26t | Bản thử: v0.4c25t cộng WB theo look. Nạp sau khi v0.4c25t chạy tốt. |
 | v0.4c17 | Bản nền không có halation. Dùng để quay về nếu không muốn halation. |
 | v0.4c22t | Bản thử chẩn đoán: đi đường xử lý mới nhưng không vẽ quầng. Chỉ dùng khi tìm lỗi. |
 | v0.4c23t | Bản thử: quầng cố định ở mức Med. Chỉ dùng khi tìm lỗi. |
@@ -362,5 +397,6 @@ Có thể xem danh sách bằng `python caduceus.py list --camera em1mk2`.
 
 Tài liệu liên quan: [README](../README.vi.md) · [Changelog E-M1 II](../patches/omdem1mk2/CHANGELOG.md) ·
 [Ghi chú port](PORT_EM1MK2.md) · [Quy trình thử halation](OMD-EM1-II/thu-may-halation.md) ·
+[Thử nhớ look](OMD-EM1-II/thu-may-nho-look.md) · [Thử WB theo look](OMD-EM1-II/thu-may-look-wb.md) ·
 [Cập nhật firmware chính hãng bằng OM Workspace](huong-dan-cap-nhat-firmware-om-workspace.md) ·
 [Firmware guide (tiếng Anh)](FIRMWARE_GUIDE.md)
