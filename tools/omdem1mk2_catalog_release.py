@@ -1,0 +1,328 @@
+#!/usr/bin/env python3
+"""Validate and seal the E-M1 II port for OM's catalog firmware."""
+
+import argparse
+import importlib.util
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import struct
+
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+import caduceus
+from tools import build_package
+from omdem1mk2_layout import BASE, loaded_sections
+
+BASE_RELEASE = 'v0.4c15'
+VERSION = 'v0.4c16'
+COLOR_CREATOR_VERSION = 'v0.4c17'
+HALATION_TEST_VERSION = 'v0.4c18t'      # v0.4c17 + halation step 3 with a fixed stage (camera test only)
+HALATION_EDITS = ROOT / 'patches/omdem1mk2/halation/edits.json'
+SHARP_TEST_VERSION = 'v0.4c19t'       # v0.4c17 + Sharpness linear scale (camera test only)
+SHARP_EDITS = ROOT / 'patches/omdem1mk2/sharp_scale/edits.json'
+# Halation step 4: v0.4c17 + the Color Creator Halo page + halation, watchdog timeout 30 s. Value: (forced stage, no
+# pass). The two camera tests fix the stage at Med (2); no_pass 1 = Art route + neutral blend only (combiner 13 A/B).
+# The release candidate reads the stage from the Halo page (sid 961, default 0 = Off).
+HALO_DIAG_VERSION = 'v0.4c22t'
+HALO_GLOW_VERSION = 'v0.4c23t'
+HALO_RELEASE_VERSION = 'v0.4c24'
+HALO_STAGE = 2
+# Look memory: v0.4c24 + the remembered look (sid 965), camera test only. Its code is in the same gap as the Halo page.
+LOOKMEM_VERSION = 'v0.4c25t'
+# Look WB: v0.4c25t + the active look's WB fine-tune (patches/omdem1mk2/look_wb, built with EM1_LOOKMEM=1), camera test.
+LOOK_WB_VERSION = 'v0.4c26t'
+LOOK_WB_EDITS = ROOT / 'patches/omdem1mk2/look_wb/edits.json'
+# Colour wheel: v0.4c26t + the Color Creator Wheel page (color_creator_wheel built with EM1_CC_HALO=1 EM1_LOOKMEM=1
+# EM1_CC_WHEEL=1) and its value feed (patches/omdem1mk2/color_wheel, built with EM1_LOOKMEM=1), camera test.
+COLOR_WHEEL_VERSION = 'v0.4c27t'
+COLOR_WHEEL_CC_EDITS = ROOT / 'patches/omdem1mk2/color_creator_wheel/edits_halo_lookmem_wheel.json'
+COLOR_WHEEL_EDITS = ROOT / 'patches/omdem1mk2/color_wheel/edits.json'
+COLOR_WHEEL_NEW_ADDRS = ('0x61259c68', '0x612f1900')   # record+40 (OK) hook, the Wheel page section (.cwui)
+LOOK_WB_BUILDS = (LOOK_WB_VERSION, COLOR_WHEEL_VERSION)
+LOOKMEM_BUILDS = (LOOKMEM_VERSION, *LOOK_WB_BUILDS)
+HALO_BUILDS = {HALO_DIAG_VERSION: (HALO_STAGE, 1), HALO_GLOW_VERSION: (HALO_STAGE, 0), HALO_RELEASE_VERSION: (0, 0),
+               LOOKMEM_VERSION: (0, 0), LOOK_WB_VERSION: (0, 0), COLOR_WHEEL_VERSION: (0, 0)}
+WHEEL_EDITS = ROOT / 'patches/omdem1mk2/color_creator_wheel/edits.json'
+HALO_WHEEL_EDITS = ROOT / 'patches/omdem1mk2/color_creator_wheel/edits_halo.json'
+HALO_PAGE_ADDR = '0x612f0000'             # the Halo page section, in the gap the halation edits make Section 6 load
+LOOKMEM_WHEEL_EDITS = ROOT / 'patches/omdem1mk2/color_creator_wheel/edits_halo_lookmem.json'
+LOOKMEM_SD_EDITS = ROOT / 'patches/omdem1mk2/sd_loader/edits_lookmem.json'
+LOOKMEM_ADDR = '0x612f0800'               # sd_loader's look memory section (build.py LMEM_ADDR), same gap
+SD_EDITS = ROOT / 'patches/omdem1mk2/sd_loader/edits.json'
+SD_LOADER_CAVE = '0x60580200'
+CAMERA = 'em1mk2'
+CATALOG_SECTION_END = 0x60257000
+ASPECT_SECTION_END = 0x60257800
+SECTION1_END_WORD = 0x60042B4D
+
+
+def extract_for_build(stock):
+    extracted = ROOT / 'em1mk2/extracted'
+    extracted.mkdir(parents=True, exist_ok=True)
+    components = {caduceus.kind(header): payload for _, header, payload, _ in caduceus.parse(stock)}
+    for kind, filename in (
+        (0x100, '00_0100_40560020.decoded.bin'),
+        (0x101, '01_0101_42060020.decoded.bin'),
+    ):
+        path = extracted / filename
+        if path.exists() and path.read_bytes() != components[kind]:
+            raise ValueError(f'Existing extracted firmware differs from catalog stock: {path}')
+        if not path.exists():
+            path.write_bytes(components[kind])
+    return components[0x100]
+
+
+def catalog_spec(legacy, main):
+    _, end = loaded_sections(main)[1]
+    old = struct.pack('<I', CATALOG_SECTION_END)
+    offset = SECTION1_END_WORD - BASE
+    if end != CATALOG_SECTION_END or main[offset:offset + 4] != old:
+        raise ValueError('Unexpected Section 1 end in the catalog firmware')
+    padding = main[end - BASE:ASPECT_SECTION_END - BASE]
+    if padding != b'\xff' * (ASPECT_SECTION_END - end):
+        raise ValueError('Section 1 expansion overlaps non-padding content')
+    section_end = {
+        'kind': '0x100',
+        'addr': hex(SECTION1_END_WORD),
+        'expect': old.hex(),
+        'new': struct.pack('<I', ASPECT_SECTION_END).hex(),
+        'why': 'Load the Section 1 tail used by the v0.4c15 aspect code and labels',
+    }
+    return {
+        **legacy,
+        'version': VERSION,
+        'stock_sha256': caduceus.EM1MK2_CATALOG_STOCK_SHA,
+        'edits': [section_end, *legacy['edits']],
+    }
+
+
+def replace_color_creator_edits(spec, wheel=WHEEL_EDITS, new_addrs=()):
+    edits = json.loads(wheel.read_text(encoding='utf-8'))['edits']
+    replacements = {(edit['kind'], edit['addr']): edit for edit in edits}
+    if len(replacements) != len(edits):
+        raise ValueError('Color Creator edits contain duplicate addresses')
+    merged = []
+    for edit in spec['edits']:
+        patch = replacements.pop((edit['kind'], edit['addr']), None)
+        # a rebuilt cave may be shorter (the wheel build moves its tables to the gap): only when the stock bytes it no
+        # longer covers are padding (all 0xff) and it still writes something
+        shorter = (patch and patch['new'] and edit['expect'].startswith(patch['expect'])
+                   and set(edit['expect'][len(patch['expect']):].lower()) <= {'f'})
+        if patch and not (patch['expect'].startswith(edit['expect']) or shorter):
+            raise ValueError(f"Color Creator stock bytes changed at {edit['addr']}")
+        merged.append(patch or edit)
+    added = [replacements.pop(('0x100', addr)) for addr in new_addrs if ('0x100', addr) in replacements]
+    if replacements or len(added) != len(new_addrs):
+        raise ValueError('Color Creator changes must replace existing edits')
+    merged += added
+    if merged == spec['edits']:
+        raise ValueError('Rebuild the Color Creator edits before sealing this release')
+    return {**spec, 'version': COLOR_CREATOR_VERSION, 'edits': merged}
+
+
+def halation_test_spec(spec):
+    patch = json.loads(HALATION_EDITS.read_text(encoding='utf-8'))
+    if patch.get('force_stage') not in (1, 2, 3):
+        raise ValueError('Build the halation test edits with EM1_HL_FORCE_STAGE=1..3 before sealing ' + HALATION_TEST_VERSION)
+    return {**spec, 'version': HALATION_TEST_VERSION, 'halation_force_stage': patch['force_stage'],
+            'edits': [*patch['edits'], *spec['edits']]}
+
+
+def sd_loader_is_lookmem(spec):
+    """Which sd_loader build the spec carries (its cave edit), so code linked against sd_loader (halation's p_get)
+    uses that build's addresses: the look memory build moves them. Refuses a cave that matches neither build."""
+    cave = next(e['new'] for e in spec['edits'] if e['kind'] == '0x100' and e['addr'] == SD_LOADER_CAVE)
+    builds = {}
+    for lookmem, path in ((False, SD_EDITS), (True, LOOKMEM_SD_EDITS)):
+        edits = json.loads(path.read_text(encoding='utf-8'))['edits']
+        builds[lookmem] = next(e['new'] for e in edits if e['addr'] == SD_LOADER_CAVE)
+    matches = [lookmem for lookmem, new in builds.items() if new == cave]
+    if len(matches) != 1:
+        raise ValueError('The sd_loader cave in this spec matches no current sd_loader build: rebuild it')
+    return matches[0]
+
+
+def halo_spec(spec, version):
+    """The halation edits built here (HALO_BUILDS[version]) in front of a v0.4c17 spec with the Halo wheel."""
+    loader = importlib.util.spec_from_file_location('hl_build', ROOT / 'patches/omdem1mk2/halation/build.py')
+    build = importlib.util.module_from_spec(loader)
+    loader.loader.exec_module(build)
+    stage, no_pass = HALO_BUILDS[version]
+    lookmem = sd_loader_is_lookmem(spec)
+    patch, _, _ = build.make_edits(stage, no_pass, lookmem)
+    # hl_flag's `call P_GET` (dd d32) must land on this spec's p_get, never on the other sd_loader build's
+    code_edit = next(e for e in patch['edits'] if int(e['addr'], 16) == build.CODE_AT)
+    code = bytes.fromhex(code_edit['new'])
+    targets = {build.CODE_AT + i + struct.unpack_from('<i', code, i + 1)[0]
+               for i in range(len(code) - 5) if code[i] == 0xDD}
+    if build.p_get(lookmem) not in targets or build.p_get(not lookmem) in targets:
+        raise ValueError("halation's p_get call does not match this spec's sd_loader build")
+    return {**spec, 'version': version, 'halation_force_stage': stage, 'halation_no_pass': no_pass,
+            'edits': [*patch['edits'], *spec['edits']]}
+
+
+def look_wb_spec(spec):
+    """The look WB edits after a look memory spec; refuses edits linked against the other sd_loader build."""
+    patch = json.loads(LOOK_WB_EDITS.read_text(encoding='utf-8'))
+    if patch.get('lookmem') != sd_loader_is_lookmem(spec):
+        raise ValueError("look_wb's p_get does not match this spec's sd_loader build: rebuild with EM1_LOOKMEM=1")
+    return {**spec, 'edits': [*spec['edits'], *patch['edits']]}
+
+
+def color_wheel_spec(spec):
+    """The colour wheel value feed (cw_get and its producer sites) after a look memory spec; refuses edits linked
+    against the other sd_loader build."""
+    patch = json.loads(COLOR_WHEEL_EDITS.read_text(encoding='utf-8'))
+    if patch.get('lookmem') != sd_loader_is_lookmem(spec):
+        raise ValueError("color_wheel's p_get does not match this spec's sd_loader build: rebuild with EM1_LOOKMEM=1")
+    return {**spec, 'edits': [*spec['edits'], *patch['edits']]}
+
+
+def sharp_test_spec(spec):
+    patch = json.loads(SHARP_EDITS.read_text(encoding='utf-8'))
+    return {**spec, 'version': SHARP_TEST_VERSION, 'edits': [*patch['edits'], *spec['edits']]}
+
+
+def validate(spec_path, version):
+    checked = []
+
+    def run(tool, *args, expected=None):
+        cmd = [sys.executable, '-B', str(ROOT / 'tools' / f'omdem1mk2_{tool}.py'), *map(str, args)]
+        print(f'Checking {tool} {" ".join(map(str, args))}', flush=True)
+        if expected is None:
+            subprocess.run(cmd, check=True, cwd=ROOT)
+        else:
+            result = subprocess.check_output(cmd, text=True, cwd=ROOT)
+            print(result, end='', flush=True)
+            if not all(line in result.splitlines() for line in expected):
+                raise ValueError(f'Unexpected result from {tool}')
+        checked.append(tool)
+
+    run('check_loaded', spec_path)
+    run('audit_opcodes', spec_path)
+    run('emu_validator', expected=[
+        f'sid {sid}: count 5 values [1, 3, 2, 4, 9]' for sid in (270, 511, 512)
+    ])
+    run('emu_validator', spec_path, expected=[
+        f'sid {sid}: count 7 values [1, 3, 2, 4, 9, 6, 7]' for sid in (270, 511, 512)
+    ])
+    run('emu_rules', '-', expected=['offered values: [1, 2, 3, 4, 9]'])
+    run('emu_rules', spec_path, expected=['offered values: [1, 2, 3, 4, 6, 7, 9]'])
+    for tool in ('emu_aspect', 'emu_fixed_patches', 'emu_sdload', 'emu_af', 'emu_artflags', 'emu_capture_kind', 'emu_combiner',
+                 'emu_blend_setup', 'emu_mapper'):
+        run(tool, spec_path)
+    if version in (COLOR_CREATOR_VERSION, HALATION_TEST_VERSION, SHARP_TEST_VERSION, *HALO_BUILDS):
+        run('emu_color_creator', spec_path)
+    if version == SHARP_TEST_VERSION:
+        run('emu_sharp_scale', spec_path)
+    if version == HALATION_TEST_VERSION:
+        stage = json.loads(Path(spec_path).read_text(encoding='utf-8'))['halation_force_stage']
+        run('emu_halation_flag', spec_path, '--force-stage', stage)
+    if version in HALO_BUILDS:
+        stage, no_pass = HALO_BUILDS[version]
+        run('emu_halation_flag', spec_path, *(['--force-stage', stage] if stage else []))
+        run('emu_halation_route', spec_path, *(['--no-pass'] if no_pass else []),
+            *([] if stage else ['--stage-setting']))
+        if version == COLOR_WHEEL_VERSION:
+            # The Wheel page moves Halo to page 5: emu_color_wheel_page checks it there against v0.4c26t's page 4.
+            run('emu_color_wheel_page', spec_path)
+        else:
+            run('emu_halo_page', spec_path)
+        run('emu_watchdog', spec_path)
+        if not stage:
+            run('emu_spare_setting', spec_path)
+        if not no_pass:
+            run('emu_halation_pass')
+    if version in LOOKMEM_BUILDS:
+        run('emu_look_memory', spec_path)
+    if version in LOOK_WB_BUILDS:
+        run('emu_look_wb', spec_path)
+    if version == COLOR_WHEEL_VERSION:
+        run('emu_color_wheel_probe')
+        run('emu_color_wheel_feed', spec_path)
+    # Both releases preserve the camera-tested v0.4c15 aspect assets byte for byte.
+    run('emu_scp', spec_path, '--reference', ROOT / 'releases' / CAMERA / BASE_RELEASE / 'edits.json')
+    return sorted(set(checked))
+
+
+def seal(stock_path, version):
+    destination = ROOT / 'releases' / CAMERA / version
+    if destination.exists():
+        raise ValueError(f'Release already exists: {destination}')
+    stock = stock_path.read_bytes()
+    if caduceus.sha(stock) != caduceus.EM1MK2_CATALOG_STOCK_SHA:
+        raise ValueError('The input must match the pinned E-M1 Mark II 3.70 OM catalog checksum')
+    legacy, _, card, cam = caduceus.load_release(BASE_RELEASE, CAMERA)
+    main = extract_for_build(stock)
+    spec = catalog_spec(legacy, main)
+    if version in (COLOR_CREATOR_VERSION, HALATION_TEST_VERSION, SHARP_TEST_VERSION):
+        spec = replace_color_creator_edits(spec)
+    if version in LOOKMEM_BUILDS:
+        if version == COLOR_WHEEL_VERSION:
+            spec = replace_color_creator_edits(spec, COLOR_WHEEL_CC_EDITS, (HALO_PAGE_ADDR, *COLOR_WHEEL_NEW_ADDRS))
+        else:
+            spec = replace_color_creator_edits(spec, LOOKMEM_WHEEL_EDITS, (HALO_PAGE_ADDR,))
+        spec = halo_spec(replace_color_creator_edits(spec, LOOKMEM_SD_EDITS, (LOOKMEM_ADDR,)), version)
+        if version in LOOK_WB_BUILDS:
+            spec = look_wb_spec(spec)
+        if version == COLOR_WHEEL_VERSION:
+            spec = color_wheel_spec(spec)
+    elif version in HALO_BUILDS:
+        spec = halo_spec(replace_color_creator_edits(spec, HALO_WHEEL_EDITS, (HALO_PAGE_ADDR,)), version)
+    if version == HALATION_TEST_VERSION:
+        spec = halation_test_spec(spec)
+    if version == SHARP_TEST_VERSION:
+        spec = sharp_test_spec(spec)
+    with tempfile.TemporaryDirectory(prefix='.catalog-release-', dir=destination.parent) as tmp:
+        staging = Path(tmp) / version
+        staging.mkdir()
+        spec_path = staging / 'edits.json'
+        spec_path.write_text(json.dumps(spec, indent=2) + '\n', encoding='utf-8', newline='\n')
+        checked = validate(spec_path, version)
+        patched, restore, info = build_package.build(spec, stock, camera=cam)
+        if restore != stock or caduceus.apply_edits(spec, stock, camera=cam) != (patched, restore):
+            raise ValueError('Independent package builders disagree or restore differs from stock')
+        info.update(
+            spec=f'releases/{CAMERA}/{version}/edits.json',
+            spec_sha256=caduceus.sha(spec_path.read_bytes()),
+            stock_sha256=spec['stock_sha256'],
+            patched_sha256=caduceus.sha(patched),
+            restore_sha256=caduceus.sha(restore),
+            bytes=len(patched),
+            camera_name=cam.name,
+            camera_contacted=False,
+            checks=checked,
+        )
+        meta = (json.dumps(info, indent=2) + '\n').encode('utf-8')
+        (staging / 'build.json').write_bytes(meta)
+        hashes = {
+            cam.card_name: info['patched_sha256'],
+            'restore-stock.pkg.bin': info['restore_sha256'],
+            'edits.json': info['spec_sha256'],
+            'build.json': caduceus.sha(meta),
+        }
+        for name, data in card.items():
+            path = staging / 'card' / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            hashes[f'card/{name}'] = caduceus.sha(data)
+        sums = ''.join(f'{hashes[name]}  {name}\n' for name in sorted(hashes))
+        (staging / 'SHA256SUMS').write_text(sums, encoding='utf-8', newline='\n')
+        staging.rename(destination)
+    print(f'Sealed {destination} from OM catalog stock')
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--stock', type=Path, required=True)
+    parser.add_argument('--version', choices=(VERSION, COLOR_CREATOR_VERSION, HALATION_TEST_VERSION, SHARP_TEST_VERSION,
+                                                 *HALO_BUILDS), default=VERSION)
+    args = parser.parse_args()
+    try:
+        seal(args.stock, args.version)
+    except (OSError, ValueError, caduceus.Refuse, subprocess.CalledProcessError) as error:
+        sys.exit(f'error: {error}')

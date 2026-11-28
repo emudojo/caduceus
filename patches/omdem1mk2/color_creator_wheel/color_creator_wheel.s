@@ -1,0 +1,1460 @@
+/* Olympus OM-D E-M1 Mark II Firmware 3.70 - Color Creator Caduceus Look Selector
+ *
+ * Implements pure Caduceus Live View Color Creator architecture (matching E-P7 ed_ui / ed_view):
+ *   - Hooks the Live View Color Creator 56-byte editor parent controller record at 0x61259c40 (key 0x13a9):
+ *       +04 (0x61259c44): cc_init  (stock 0x60e8b9bd) — initializes children, sets page=0 (Film), applies look
+ *       +12 (0x61259c4c): cc_up    (stock 0x60e8bda4) — Up arrow & Rear Dial (+) per-click
+ *       +16 (0x61259c50): cc_down  (stock 0x60e8bedf) — Down arrow & Rear Dial (-) per-click
+ *       +20 (0x61259c54): cc_left  (stock 0x60e8c0f5) — Left arrow & Front Dial (+) per-click
+ *       +24 (0x61259c58): cc_right (stock 0x60e8c46a) — Right arrow & Front Dial (-) per-click
+ *       +28 (0x61259c5c): cc_dial1 (stock 0x60e8c786) — Rear Dial wrapper (sets dial_active flag around stock loop)
+ *       +32 (0x61259c60): cc_dial2 (stock 0x60e8c9d3) — Front Dial wrapper (sets dial_active flag around stock loop)
+ *       +36 (0x61259c64): cc_page  (stock 0x60e8cc69) — intercepts TRASH (0x9016) to cycle pages
+ *       +44 (0x61259c6c): cc_info  (stock 0x60e8d038) — intercepts INFO (0x9014) to cycle pages
+ *   - Hooks the Color Creator View Part Table Guide Label writer in .data init at 0x60297fb4:
+ *       cc_guide (stock 0x60e543d6) — writes kind-5 inline UTF-16LE text to (40, view) / (48, view)
+ *       displaying the active look name (Page 0) or live page values (Chroma, Luminance, Midtones).
+ *
+ * Pages (P_PAGE in the shared state block P, see ../p_layout.inc), INFO and TRASH both step forward through
+ * 0 .. N_PAGES-1 and wrap to Film (EM1_CC_WHEEL=1: TRASH on the Wheel page steps the axis instead). Page numbers are
+ * the PG_* constants below (they move with EM1_CC_WHEEL=1):
+ *   - PG_FILM: arrows step the look; the look drives the E-P7 COLOR engine (sd_loader cc_sel/cc_hl:
+ *       12-sector S, per-sector H/L) plus tone 384/692/383 (HL/MID/SH, read by the image request); colour looks reset Color Creator
+ *       vividness (618) to 0, mono looks set -4. Dials: stock wheel (vividness 618 / hue 617).
+ *       Banner: name, " Exx" (failed 617/618 write), " C<card state>", " K<key>" and "+" once applied.
+ *   - PG_WHEEL (EM1_CC_WHEEL=1 only, right after Film): one Wheel page, the look's S, H or L axis (P_WAXIS) drawn as
+ *       the dormant 12-sector COLOR-wheel polygon (C3d kind 5; values from ../color_wheel cw_get). The Down arrow and
+ *       TRASH step the axis S -> H -> L -> S and redraw (TRASH as Delete on the E-P7 / PEN-F wheel); Up, Left, Right
+ *       and both dials do nothing (the dials reach cc_up/cc_down through the stock dial loop, told apart by P_DIAL).
+ *       Entering the page switches the C3d surface
+ *       stop type 0 -> start type 4 -> draw; leaving it (page step, OK, other events) switches back stop type 4 ->
+ *       start type 0 -> draw (section .cwui, cw_*).
+ *   - PG_CHROMA: offset on all 12 sectors of the look's S (-5..+5).
+ *   - PG_LUM: Front Dial & Left/Right = Highlights (384), Rear Dial & Up/Down = Shadows (383).
+ *   - PG_STR: x1 / x1.5 / x2 / x3 on the look's S, hue and light. Midtone comes from the look only.
+ *   - PG_HALO (EM1_CC_HALO=1): halation stage (section .hlui).
+ *
+ * Cave location: 0x612e6900, Section 6 FF tail 0x612e68c4..0x612e7000 (Section 6 ends at 0x612e7000;
+ *   nothing past it is loaded). Built-in looks are in the Section 5 tail (build.py BUILTIN_ADDR).
+ *
+ * State: heap block P (../p_layout.inc), owned by sd_loader (p_get / p_ensure).
+ *   v0.1 and v0.2b1 used 0x621e2f76..0x621e2f87, which turned out to be inside a stock 32-entry
+ *   callback ring (0x621e2f74..0x621e3073): stock overwrote the state (garbage names, looks not
+ *   sticking) and the state overwrote queued callbacks.
+ */
+
+/* E-M1 II setting ids (sid table 0x604f808c, validator table 0x604ee648 (unsorted); see
+ * em1mk2/docs/ARCHITECTURE_AND_MEMORY_MAP.md §7.3). This body's ids are the E-P7's minus 2. */
+.equ SID_CC_HUE,   617      /* 0xE8F1, 0..29  -> request +24206 */
+.equ SID_CC_VIVID, 618      /* 0xE909, -4..+3 -> request +24207 */
+/* Tone = the properties the image request reads directly (request builder 0x602d243d/2453/2466 ->
+ * request +24937..+24939; same keys and mapping as the E-P7: TONE_ENDS.md §1.3 "384 HL / 694 MID / 383 SH").
+ * On the E-P7 they are refreshed from the per-mode 891..893; the E-M1 II has that storage (889..891) but no
+ * code using it, so v0.3b5 writes the request-side values. Half-word, validator -7..+7.
+ * History: 889..891 (v0.2b1-v0.3b2) dead, no readers; 449/450 (v0.3b3-b4) stored with callbacks, but no
+ * visible effect in live view or JPEG in Color Creator (camera, 2026-11-11). */
+.equ SID_TONE_HL,  384      /* 0x3739 Highlights */
+.equ SID_TONE_MID, 692      /* 0xEFC9 Midtones (no stock UI on this body, but the request reads it) */
+.equ SID_TONE_SH,  383      /* 0x3719 Shadows */
+.ifndef HALO
+.equ HALO, 0
+.endif
+.ifndef CC_WHEEL
+.equ CC_WHEEL, 0
+.endif
+.equ PG_FILM,      0
+.if CC_WHEEL
+.if HALO == 0
+.error "EM1_CC_WHEEL needs EM1_CC_HALO=1 (its code is in the gap the halation patch loads)"
+.endif
+.equ PG_WHEEL,     1        /* Wheel: axis P_WAXIS 0..2 = S / H / L, stepped by Down */
+.equ PG_CHROMA,    2
+.equ PG_LUM,       3
+.equ PG_STR,       4
+.equ PG_HALO,      5
+.equ N_PAGES,      5 + HALO /* Film, Wheel, Chroma, Luminance, Strength (+ Halo) */
+.else
+.equ PG_CHROMA,    1
+.equ PG_LUM,       2
+.equ PG_STR,       3
+.equ PG_HALO,      4
+.equ N_PAGES,      4 + HALO /* Film, Chroma, Luminance, Strength (+ Halo: build with EM1_CC_HALO=1) */
+.endif
+.equ SID_HALO,     961      /* halation stage, docs/OMD-EM1-II/HALATION.md: 0 Off, 1 Low, 2 Med, 3 High */
+.equ VIVID_MIN,    -4       /* lowest valid 618 value; there is no monochrome in Color Creator */
+
+.include "p_layout.inc"
+
+.am33_2
+.text
+.global _start
+.global cc_init
+.global cc_up
+.global cc_down
+.global cc_left
+.global cc_right
+.global cc_dial1
+.global cc_dial2
+.global cc_page
+.global cc_info
+.global cc_guide
+.global scp_cc_label
+
+_start:
+
+/* State lives in the heap block P (../p_layout.inc), created and validated by sd_loader's
+ * p_ensure / p_get (Section 2; Section 6 may call it, load order 1,7,2,3,4,5,6).
+ *   call p_get,[d2,d3],12             -> a0 = P or 0; preserves d0, d1, a1
+ *   call p_ensure,[d2,d3,a2,a3],20    -> a0 = P (created if needed) or 0
+ * Convention: handlers keep P in a2; helpers entered by `call X,[d2,d3,a2,a3],N` read it from a2.
+ * Without P every handler behaves as stock. v0.1/v0.2b1 kept this state at 0x621e2f76.., inside
+ * the stock callback ring 0x621e2f74..0x621e3073 (garbage names, looks not sticking). */
+
+/* =========================================================================
+ * 1. cc_init: Controller Record +4 (Create, stock 0x60e8b9bd)
+ * CALLS entry: a0 = parent, d0 = key (0x13a9)
+ * ========================================================================= */
+cc_init:
+    movm [d2,d3,a2,a3],(sp)
+    add -16,sp
+    mov a0,a3
+
+    /* Stock init first so Child 0 (124,a3) & Child 1 (128,a3) exist */
+    calls em1_cc_init
+    mov d0,d3
+
+.ifdef LOOKMEM
+    call lm_ensure,[d2,d3,a2,a3],20    /* p_ensure, then restore the remembered look (section .hlui) */
+.else
+    call p_ensure,[d2,d3,a2,a3],20
+.endif
+    cmp 0,a0
+    beq 9f
+    mov a0,a2
+
+    /* Record the raw picture-mode property while the Color Creator editor is open: the colour-stage
+     * hook applies looks only while 0x9481 still has this value (sd_loader cc_sel). */
+    mov 0x9481,d0
+    clr d1
+    mov 0,a0
+    call em1_getter,[d2,d3],12
+    mov d0,(P_CCMODE,a2)
+
+    /* Always start on Film with dial_active = 0 */
+    clr d0
+    movhu d0,(P_PAGE,a2)            /* PG_FILM */
+    movbu d0,(P_DIAL,a2)
+.if CC_WHEEL
+    movbu d0,(P_WON,a2)             /* safety: the wheel feed is off on entry (no fwOpe call here: the GUI starts type 0) */
+.endif
+
+    /* Apply look 0 on first entry and when switching to a pack loaded since the last entry.
+     * Keep the active editor source stable during an HLS half-press: the guide, arrows and
+     * colour state must all continue to use the same source until this UI task applies the pack. */
+    movhu (P_SD_STATE,a2),d1
+    cmp 1,d1
+    beq 0f
+    clr d1
+0:
+    inc d1                          /* 1 built-in / 2 card */
+    movhu (P_INIT,a2),d0
+    cmp d1,d0
+    beq 1f
+    clr d0
+    movbu d0,(P_ACTIVE,a2)          /* off first: the colour stage and look WB read P_INIT / P_LOOK while it is on */
+    movhu d1,(P_INIT,a2)
+    movhu d0,(P_LOOK,a2)
+    call apply_active_look,[d2,d3,a2,a3],20
+    bra 2f
+1:
+    /* Same source: pick up the current Highlight/Shadow settings. */
+    mov SID_TONE_HL,d0
+    call get_setting_facade,[d2,d3,a2,a3],24
+    movbu d0,(P_HL,a2)
+    mov SID_TONE_SH,d0
+    call get_setting_facade,[d2,d3,a2,a3],24
+    movbu d0,(P_SH,a2)
+2:
+    call sync_children_and_view,[d2,d3,a2,a3],20
+9:
+    mov d3,d0
+    ret [d2,d3,a2,a3],32
+
+
+/* =========================================================================
+ * 2. cc_dial1 / cc_dial2: Rear Dial (+28) & Front Dial (+32) Wrappers
+ * Set P_DIAL = 1 while the stock dial loop calls cc_up/down/left/right once per detent.
+ * Frame 16: (0,sp) call slot, 12 B saved d2/d3/a2. a2 = parent, d2 = P (or 0).
+ * ========================================================================= */
+cc_dial1:
+    movm [d2,d3,a2],(sp)
+    add -4,sp
+    mov a0,a2
+    call p_get,[d2,d3],12
+    mov a0,d2
+    cmp 0,d2
+    beq 1f
+    mov 1,d3
+    movbu d3,(P_DIAL,a0)
+1:
+    mov a2,a0
+    calls em1_cc_dial1
+    cmp 0,d2
+    beq 2f
+    mov d2,a0
+    clr d3
+    movbu d3,(P_DIAL,a0)
+2:
+    ret [d2,d3,a2],16
+
+cc_dial2:
+    movm [d2,d3,a2],(sp)
+    add -4,sp
+    mov a0,a2
+    call p_get,[d2,d3],12
+    mov a0,d2
+    cmp 0,d2
+    beq 1f
+    mov 1,d3
+    movbu d3,(P_DIAL,a0)
+1:
+    mov a2,a0
+    calls em1_cc_dial2
+    cmp 0,d2
+    beq 2f
+    mov d2,a0
+    clr d3
+    movbu d3,(P_DIAL,a0)
+2:
+    ret [d2,d3,a2],16
+
+
+/* =========================================================================
+ * 3. cc_info & cc_page: Cycle Pages on INFO (0x9014) or TRASH (0x9016)
+ * CALLS entry: a0 = parent, d0 = event, d1 = arg
+ * ========================================================================= */
+cc_page:
+.if CC_WHEEL
+    jmp cw_page                     /* TRASH: axis on the Wheel page, else cc_info; others: cw_event (section .cwui) */
+.else
+    cmp 0x9016,d0
+    beq cc_info
+    jmp em1_cc_page
+.endif
+
+cc_info:
+    movm [d2,d3,a2,a3],(sp)
+    add -12,sp
+    mov a0,a3
+    call p_get,[d2,d3],12
+    cmp 0,a0
+    bne 2f
+    /* No P: stock behaviour */
+    mov a3,a0
+    cmp 0x9016,d0
+    beq 1f
+    calls em1_cc_info
+    ret [d2,d3,a2,a3],28
+1:
+    calls em1_cc_page
+    ret [d2,d3,a2,a3],28
+2:
+    mov a0,a2
+.if CC_WHEEL
+    call cw_next_page,[d2,d3,a2,a3],20  /* step the page and switch the C3d surface (section .cwui) */
+.else
+    /* Cycle page: 0 -> 1 -> ... -> N_PAGES-1 -> 0 */
+    movhu (P_PAGE,a2),d0
+    inc d0
+    cmp N_PAGES,d0
+    bcs 3f
+    clr d0
+3:
+    movhu d0,(P_PAGE,a2)
+.endif
+    bra cc_poke_child
+
+
+/* =========================================================================
+ * 4. cc_up / cc_down / cc_left / cc_right: arrows, and dials via the stock dial loop
+ * CALLS entry: a0 = parent, d0 = event, d1 = arg
+ * Registers are saved FIRST: the stock dial loop (0x60e8c786 / 0x60e8c9d3) keeps its detent
+ * counter in d2 and count in d3 (v0.1 overwrote both). Frame 28: (0,sp) call slot,
+ * (4,sp) incoming d0, (8,sp) incoming d1, 16 B saved regs. a3 = parent, a2 = P, d3 = direction.
+ * ========================================================================= */
+cc_up:
+    movm [d2,d3,a2,a3],(sp)
+    add -12,sp
+    mov a0,a3
+    mov d0,(4,sp)
+    mov d1,(8,sp)
+    mov 1,d3
+    bra cc_up_down_common
+
+cc_down:
+    movm [d2,d3,a2,a3],(sp)
+    add -12,sp
+    mov a0,a3
+    mov d0,(4,sp)
+    mov d1,(8,sp)
+    mov -1,d3
+
+cc_up_down_common:
+    call p_get,[d2,d3],12
+    cmp 0,a0
+    beq cc_ud_stock
+    mov a0,a2
+    movhu (P_PAGE,a2),d2
+.if CC_WHEEL
+    cmp PG_WHEEL,d2
+    bne 1f
+    jmp cw_down                     /* Wheel: Down arrow steps the axis, the rest does nothing (section .cwui) */
+1:
+.endif
+    cmp PG_FILM,d2
+    beq cc_ud_p0
+    cmp PG_LUM,d2
+    beq cc_ud_lum
+    bra cc_ud_stock
+
+cc_ud_p0:
+    /* Page 0: dial = stock Vividness; Up/Down arrows step the look */
+    movbu (P_DIAL,a2),d2
+    cmp 0,d2
+    bne cc_ud_stock
+    mov d3,d2
+    call step_film_profile,[d2,d3,a2,a3],20
+    bra cc_poke_child
+
+cc_ud_lum:
+    mov d3,d2
+    call step_shadows,[d2,d3,a2,a3],20
+    bra cc_poke_child
+
+cc_ud_stock:
+    mov a3,a0
+    mov (4,sp),d0
+    mov (8,sp),d1
+    cmp 0,d3
+    bgt 1f
+    calls em1_cc_down
+    ret [d2,d3,a2,a3],28
+1:
+    calls em1_cc_up
+    ret [d2,d3,a2,a3],28
+
+cc_left:
+    movm [d2,d3,a2,a3],(sp)
+    add -12,sp
+    mov a0,a3
+    mov d0,(4,sp)
+    mov d1,(8,sp)
+    mov -1,d3
+    bra cc_left_right_common
+
+cc_right:
+    movm [d2,d3,a2,a3],(sp)
+    add -12,sp
+    mov a0,a3
+    mov d0,(4,sp)
+    mov d1,(8,sp)
+    mov 1,d3
+
+cc_left_right_common:
+    call p_get,[d2,d3],12
+    cmp 0,a0
+    beq cc_lr_stock
+    mov a0,a2
+    movhu (P_PAGE,a2),d2
+.if CC_WHEEL
+    cmp PG_WHEEL,d2
+    bne 2f
+    jmp cc_ret1                     /* Wheel: Left / Right and the front dial do nothing */
+2:
+.endif
+    cmp PG_FILM,d2
+    beq cc_lr_p0
+    cmp PG_CHROMA,d2
+    beq cc_lr_chr
+    cmp PG_LUM,d2
+    beq cc_lr_lum
+.if HALO
+    cmp PG_HALO,d2
+    bne 1f
+    jmp hl_ui_step           /* PG_HALO: Halo (section .hlui) */
+1:
+.endif
+    /* PG_STR (Strength) */
+    mov d3,d2
+    call step_strength,[d2,d3,a2,a3],20
+    bra cc_poke_child
+
+cc_lr_p0:
+    /* Page 0: dial = stock Hue; Left/Right arrows step the look */
+    movbu (P_DIAL,a2),d2
+    cmp 0,d2
+    bne cc_lr_stock
+    mov d3,d2
+    call step_film_profile,[d2,d3,a2,a3],20
+    bra cc_poke_child
+
+cc_lr_chr:
+    mov d3,d2
+    call step_chroma,[d2,d3,a2,a3],20
+    bra cc_poke_child
+
+cc_lr_lum:
+    mov d3,d2
+    call step_highlights,[d2,d3,a2,a3],20
+    bra cc_poke_child
+
+cc_lr_stock:
+    /* stock left = 0x60e8c0f5, right = 0x60e8c46a (record +20 / +24) */
+    mov a3,a0
+    mov (4,sp),d0
+    mov (8,sp),d1
+    cmp 0,d3
+    bgt 1f
+    calls em1_cc_left
+    ret [d2,d3,a2,a3],28
+1:
+    calls em1_cc_right
+    ret [d2,d3,a2,a3],28
+
+
+/* =========================================================================
+ * 5. cc_poke_child & sync_children_and_view (a3 = parent):
+ * Re-read Child 0 (Hue, parent+124) & Child 1 (Vivid, parent+128) from the settings and send
+ * 0x900c so each commits and redraws (stock commit 0x60e4c0a7, sync 0x60e4a59c).
+ * ========================================================================= */
+cc_poke_child:
+    call sync_children_and_view,[d2,d3,a2,a3],20
+cc_ret1:
+    mov 1,d0
+    ret [d2,d3,a2,a3],28
+
+sync_children_and_view:
+    mov (124,a3),a0
+    cmp 0,a0
+    beq 1f
+    call em1_child_sync,[d2,d3,a2,a3],76
+    mov (124,a3),a0
+    mov 36876,d0
+    clr d1
+    mov (a0),a1
+    mov (a1),a1
+    calls (a1)
+1:
+    mov (128,a3),a0
+    cmp 0,a0
+    beq 2f
+    call em1_child_sync,[d2,d3,a2,a3],76
+    mov (128,a3),a0
+    mov 36876,d0
+    clr d1
+    mov (a0),a1
+    mov (a1),a1
+    calls (a1)
+2:
+    ret [d2,d3,a2,a3],20
+
+
+/* =========================================================================
+ * 6. cc_guide: Color Creator View Part 3 Guide Label Writer
+ * Hooked at .data init 0x60297fb4 (stock 0x60e543d6). CALLS entry: a0 = view.
+ * Frame 32: (0,sp) call slot, (8,sp) stock result, (12,sp) P, 16 B saved regs.
+ * Without P the stock label stays.
+ * ========================================================================= */
+cc_guide:
+    movm [d2,d3,a2,a3],(sp)
+    add -16,sp
+    mov a0,a3
+
+    calls em1_cc_guide
+    mov d0,(8,sp)
+
+    call p_get,[d2,d3],12
+    cmp 0,a0
+    bne 0f
+    jmp guide_done
+0:
+    mov a0,(12,sp)
+
+    /* Label kind = 5 (inline UTF-16LE text) at (40, view); clear 33 u16 units at view+48 */
+    mov 5,d0
+    movhu d0,(40,a3)
+    mov 2,d0
+    movhu d0,(46,a3)
+    mov a3,a0
+    add 48,a0
+    mov 33,d3
+    clr d0
+1:
+    movhu d0,(a0)
+    add 2,a0
+    add -1,d3
+    bne 1b
+
+    /* a2 = destination (view + 48) */
+    mov a3,a2
+    add 48,a2
+
+    mov (12,sp),a0
+    movhu (P_PAGE,a0),d1
+    cmp PG_FILM,d1
+    beq guide_page_film
+    cmp PG_CHROMA,d1
+    beq guide_page_chroma
+    cmp PG_LUM,d1
+    beq guide_page_lum
+
+    cmp PG_STR,d1
+    beq guide_page_str
+.if HALO
+    cmp PG_HALO,d1
+.if CC_WHEEL
+    bne 1f
+.else
+    bne guide_page_str
+.endif
+    jmp hl_ui_guide          /* PG_HALO: "Halo Med" (section .hlui) */
+.endif
+.if CC_WHEEL
+1:
+    jmp cw_guide             /* PG_WHEEL: "Wheel S <look>" (section .cwui) */
+.endif
+
+guide_page_str:
+    /* Page 3: "Strength x1.5" */
+    mov str_strength,a1
+    call copy_ascii_to_u16,[],4
+    mov (12,sp),a0
+    movbu (P_STR,a0),d0
+    and 3,d0
+    asl 2,d0
+    mov str_str_vals,a1
+    add d0,a1
+    call copy_ascii_to_u16,[],4
+    jmp guide_done
+
+guide_page_chroma:
+    /* Page 1: "Chroma: +0" */
+    mov str_chroma,a1
+    call copy_ascii_to_u16,[],4
+    mov (12,sp),a0
+    movbu (P_CHR,a0),d0
+    extb d0
+    call append_signed_num,[],4
+    bra guide_done
+
+guide_page_lum:
+    /* Page 2: "Lum H:+0 S:+0", read back from the settings */
+    mov str_lum_h,a1
+    call copy_ascii_to_u16,[],4
+    mov SID_TONE_HL,d0
+    call get_setting_facade,[d2,d3,a2,a3],24
+    call append_signed_num,[],4
+    mov str_lum_s,a1
+    call copy_ascii_to_u16,[],4
+    mov SID_TONE_SH,d0
+    call get_setting_facade,[d2,d3,a2,a3],24
+    call append_signed_num,[],4
+    bra guide_done
+
+guide_page_film:
+    mov (12,sp),a0
+    call look_name_ptr,[],4        /* a1 = ASCII name of the active look */
+    call copy_ascii_to_u16,[],4
+
+    /* Diagnostic: " E58" (camera busy) / " E16" (rejected) when a 617/618 write failed during
+     * the last look apply. Names are capped at 16 characters, so this fits the buffer. */
+    mov (12,sp),a0
+    movbu (P_DIAG,a0),d0
+    cmp 0,d0
+    beq guide_card
+    mov 0x20,d1
+    movhu d1,(a2)
+    mov 0x45,d1
+    movhu d1,(2,a2)
+    add 4,a2
+    mov d0,d1
+    lsr 4,d1
+    call put_hex_digit,[],4
+    mov d0,d1
+    and 15,d1
+    call put_hex_digit,[],4
+
+guide_card:
+    /* Card state: " C1" LOOKS.BIN loaded, " C0" not loaded yet (retrying), " CF" no file after 8 tries or a bad file */
+    mov (12,sp),a0
+    movhu (P_SD_STATE,a0),d0
+    mov 0x20,d1
+    movhu d1,(a2)
+    mov 0x43,d1
+    movhu d1,(2,a2)
+    add 4,a2
+    mov d0,d1
+    and 15,d1
+    call put_hex_digit,[],4
+    /* v0.4c14: "." + LOOKS.BIN open attempts this power-on (0 = the half-press hook never ran) */
+    mov 0x2e,d1
+    movhu d1,(a2)
+    add 2,a2
+    mov (12,sp),a0
+    movbu (P_SDTRY,a0),d1
+    call put_hex_digit,[],4
+
+    /* Code-space probe (built with EM1_SPACE_PROBE=1 only): " S+" / " S!" / " S0" from patches/omdem1mk2/space_probe. */
+.ifdef SPACE_PROBE
+    call SPROBE,[],4
+.endif
+
+    /* Pipeline diagnostic: " K" + low 16 bits of the last colour-stage key (hex), "+" once the look
+     * was applied to a frame (P_HITS). No key yet = the selector hook has not run. */
+    mov (12,sp),a0
+    mov (P_KEY,a0),d0
+    cmp 0,d0
+    beq guide_done
+    mov 0x20,d1
+    movhu d1,(a2)
+    mov 0x4b,d1
+    movhu d1,(2,a2)
+    add 4,a2
+    mov d0,d1
+    lsr 12,d1
+    call put_hex_digit,[],4
+    mov d0,d1
+    lsr 8,d1
+    call put_hex_digit,[],4
+    mov d0,d1
+    lsr 4,d1
+    call put_hex_digit,[],4
+    mov d0,d1
+    call put_hex_digit,[],4
+    mov (12,sp),a0
+    mov (P_HITS,a0),d0
+    cmp 0,d0
+    beq guide_done
+    mov 0x2b,d1
+    movhu d1,(a2)
+    add 2,a2
+
+guide_done:
+    mov (8,sp),d0
+    ret [d2,d3,a2,a3],32
+
+/* Helper: look_name_ptr (a0 = P) -> a1 = name of the active look (record +48). Uses d0, d1.
+ * Falls back to the built-in record when the name does not start with a printable character. */
+look_name_ptr:
+    movhu (P_LOOK,a0),d0
+    call look_rec,[],4             /* a1 = record */
+    add 48,a1
+    movbu (a1),d1
+    cmp 0x20,d1
+    bcs 1f
+    cmp 0x7f,d1
+    bcs 2f
+1:
+    movhu (P_LOOK,a0),d0
+    and 15,d0
+    asl 6,d0
+    mov builtin_looks+48,a1
+    add d0,a1
+2:
+    ret [],4
+
+/* Helper: look_rec (a0 = P, d0 = look index) -> a1 = 64-byte look record. Uses d0, d1.
+ * Card (E-P7 LOOKS.BIN, records at buf + 64 + 64 i) once selected by the editor and i < n,
+ * else built-in i mod 16. A newly loaded pack is picked up on the next editor entry. */
+look_rec:
+    movhu (P_INIT,a0),d1
+    cmp LOOK_SOURCE_CARD,d1
+    bne 1f
+    mov (P_BUF,a0),a1
+    cmp 0,a1
+    beq 1f
+    movhu (P_NLOOKS,a0),d1
+    cmp d1,d0
+    bcc 1f
+    asl 6,d0
+    add 64,d0
+    add d0,a1
+    ret [],4
+1:
+    and 15,d0
+    asl 6,d0
+    mov builtin_looks,a1
+    add d0,a1
+    ret [],4
+
+/* Helper: copy_ascii_to_u16
+ * Copies up to 16 printable ASCII chars from a1 into UTF-16LE at a2 (advancing a2); stops at
+ * NUL or any byte outside 0x20..0x7e. Uses d0, d3. */
+copy_ascii_to_u16:
+    mov 16,d3
+1:
+    cmp 0,d3
+    beq 2f
+    movbu (a1),d0
+    cmp 0x20,d0
+    bcs 2f
+    cmp 0x7f,d0
+    bcc 2f
+    movhu d0,(a2)
+    inc a1
+    add 2,a2
+    add -1,d3
+    bra 1b
+2:
+    ret [],4
+
+/* Helper: put_hex_digit
+ * Writes hex digit d1 (0..15) as UTF-16LE at a2 (advancing a2). Leaves d0 alone. */
+put_hex_digit:
+    and 15,d1
+    cmp 10,d1
+    bcs 1f
+    add 7,d1            /* 'A' - '0' - 10 */
+1:
+    add 0x30,d1
+    movhu d1,(a2)
+    add 2,a2
+    ret [],4
+
+/* Helper: append_signed_num
+ * Writes signed integer d0 (-9..+9) as '+N', '-N', or ' 0' into UTF-16LE at a2 (advancing a2).
+ * Out-of-range values print as '?'. Uses d0, d1, d2. */
+append_signed_num:
+    mov 0x2b,d1         /* '+' */
+    cmp 0,d0
+    bgt 1f
+    mov 0x20,d1         /* ' ' */
+    beq 1f
+    mov 0x2d,d1         /* '-' */
+    clr d2
+    sub d0,d2
+    mov d2,d0
+1:
+    movhu d1,(a2)
+    add 2,a2
+    cmp 9,d0
+    bls 2f
+    mov 0x3f-0x30,d0    /* '?' */
+2:
+    add 0x30,d0
+    movhu d0,(a2)
+    add 2,a2
+    ret [],4
+
+
+/* =========================================================================
+ * 7. SUBROUTINES: set/get through the facade, step_*, apply_active_look (a2 = P)
+ * ========================================================================= */
+
+/* set_setting_facade: SetValue(d0 = sid, 0, d1 = value) via facade vtable[0] 0x60837170.
+ * Returns d0 = 0 OK, 0xF0000058 camera busy, 0xF0000016 value/sid rejected. */
+set_setting_facade:
+    mov d0,d2
+    mov d1,d3
+    call em1_get_facade,[],4
+    mov (a0),a2
+    mov (a2),a2
+    mov d2,d0
+    exthu d0
+    clr d1
+    mov d3,a1
+    calls (a2)
+    ret [d2,d3,a2,a3],20
+
+/* set_cc_param: set_setting_facade for 617/618; a failing return's low byte goes to P_DIAG
+ * (shown as " Exx" after the look name). Stock commit 0x60e4c0a7 uses the same SetValue. */
+set_cc_param:
+    call set_setting_facade,[d2,d3,a2,a3],20
+    cmp 0,d0
+    beq 1f
+    movbu d0,(P_DIAG,a2)
+1:
+    ret [d2,d3,a2,a3],20
+
+/* get_setting_facade: d0 = sid -> d0 = value via facade vtable +8 GetValue(sid, &out)
+ * (0x60836747). Frame 24: (0,sp) call slot, (4,sp) out, 16 B regs. */
+get_setting_facade:
+    mov d0,d2
+    clr d0
+    mov d0,(4,sp)
+    call em1_get_facade,[],4
+    mov (a0),a2
+    mov (8,a2),a2
+    mov d2,d0
+    exthu d0
+    mov sp,a1
+    inc4 a1
+    calls (a2)
+    mov (4,sp),d0
+    ret [d2,d3,a2,a3],24
+
+/* step_tone: d2 = delta, d0 = P offset of the cached value, d1 = sid. Clamp -7..+7. */
+step_tone:
+    mov d1,d3                     /* sid */
+    mov a2,a0
+    add d0,a0                     /* a0 = &P[off] */
+    movbu (a0),d0
+    extb d0
+    add d2,d0
+    cmp 7,d0
+    ble 1f
+    mov 7,d0
+1:
+    cmp -7,d0
+    bge 2f
+    mov -7,d0
+2:
+    movbu d0,(a0)
+    mov d0,d1
+    mov d3,d0
+    call set_setting_facade,[d2,d3,a2,a3],20
+    call lv_refresh,[d2,d3,a2,a3],20
+    ret [d2,d3,a2,a3],20
+
+step_highlights:
+    mov P_HL,d0
+    mov SID_TONE_HL,d1
+    call step_tone,[d2,d3,a2,a3],20
+    ret [d2,d3,a2,a3],20
+
+step_shadows:
+    mov P_SH,d0
+    mov SID_TONE_SH,d1
+    call step_tone,[d2,d3,a2,a3],20
+    ret [d2,d3,a2,a3],20
+
+step_chroma:
+    movbu (P_CHR,a2),d0
+    extb d0
+    add d2,d0
+    cmp 5,d0
+    ble 1f
+    mov 5,d0
+1:
+    cmp -5,d0
+    bge 2f
+    mov -5,d0
+2:
+    movbu d0,(P_CHR,a2)
+    /* Chroma = offset on all 12 sectors of the look's saturation (pipeline reads P_SAT) */
+    call refill_look,[d2,d3,a2,a3],20
+    call lv_refresh,[d2,d3,a2,a3],20
+    ret [d2,d3,a2,a3],20
+
+/* step_strength (a2 = P, d2 = +-1): look strength 0..3 = x1, x1.5, x2, x3 (sd_loader look_fill). */
+step_strength:
+    movbu (P_STR,a2),d0
+    add d2,d0
+    cmp 3,d0
+    ble 1f
+    mov 3,d0
+1:
+    cmp 0,d0
+    bge 2f
+    clr d0
+2:
+    movbu d0,(P_STR,a2)
+    call refill_look,[d2,d3,a2,a3],20
+    call lv_refresh,[d2,d3,a2,a3],20
+    ret [d2,d3,a2,a3],20
+
+/* refill_look (a2 = P): recompute P_SAT/P_HUE/P_LIGHT from the active look (colour looks only). */
+refill_look:
+    movhu (P_LOOK,a2),d0
+    mov a2,a0
+    call look_rec,[],4
+    mov a1,a3
+    movbu (45,a3),d0
+    cmp 1,d0
+    beq 1f
+    call look_fill,[d2,d3,a2,a3],20
+1:
+    ret [d2,d3,a2,a3],20
+
+/* lv_refresh: re-write Color Creator vividness (618) with its current value. The setter has no
+ * unchanged-value skip (0x60863a8a always stores, runs 0x608647c0 and the listeners), and a 618 write is
+ * what makes live view re-run the colour stage (look changes show; Chroma/Luminance alone did not, v0.3b3). */
+lv_refresh:
+    mov SID_CC_VIVID,d0
+    call get_setting_facade,[d2,d3,a2,a3],24
+    mov d0,d1
+    mov SID_CC_VIVID,d0
+    call set_setting_facade,[d2,d3,a2,a3],20
+    ret [d2,d3,a2,a3],20
+
+step_film_profile:
+    movhu (P_LOOK,a2),d0
+    add d2,d0
+    /* Number of looks in the editor's current source. */
+    mov 16,d1
+    movhu (P_INIT,a2),d3
+    cmp LOOK_SOURCE_CARD,d3
+    bne 1f
+    mov (P_BUF,a2),a0
+    cmp 0,a0
+    beq 1f
+    movhu (P_NLOOKS,a2),d1
+    cmp 0,d1
+    bne 1f
+    mov 16,d1
+1:
+    cmp 0,d0
+    bge 2f
+    mov d1,d0
+    add -1,d0
+    bra 3f
+2:
+    cmp d1,d0
+    bcs 3f
+    clr d0
+3:
+    clr d1
+    movbu d1,(P_ACTIVE,a2)          /* off first: a capture must not pair the old look's state with the new P_LOOK */
+    movhu d0,(P_LOOK,a2)
+.ifdef LOOKMEM
+    call lm_apply_save,[d2,d3,a2,a3],20  /* apply, then remember it in sid 965 (section .hlui) */
+.else
+    call apply_active_look,[d2,d3,a2,a3],20
+.endif
+    ret [d2,d3,a2,a3],20
+
+
+/* apply_active_look (a2 = P). a3 = the look's 64-byte E-P7 record (webapp/src/format.ts lookRecord):
+ *   +0..11 hue[12], +12..23 light[12] (UI order, -15..15), +31 flags (bit1 = H/L),
+ *   +32 tone flag: 1 -> +35 HL, +36 MID, +37 SH and S nibbles +38..43 when +44 == 1;
+ *                  0 -> raw S[12] at +33..44, no tone
+ *   +45 class (0 colour, 1 mono), +48 name.
+ * Colour: P_SAT/P_HUE/P_LIGHT for the colour-stage hooks (sd_loader cc_sel / cc_hl), P_ACTIVE = 1.
+ * Mono: Color Creator cannot render B&W through the COLOR engine; P_ACTIVE = 0, vividness -4. */
+apply_active_look:
+    clr d0
+    movbu d0,(P_DIAG,a2)
+    movbu d0,(P_ACTIVE,a2)
+    movbu d0,(P_CHR,a2)
+    movhu (P_LOOK,a2),d0
+    mov a2,a0
+    call look_rec,[],4
+    mov a1,a3
+
+    /* tone */
+    clr d3
+    clr d2
+    clr d0
+    movbu (32,a3),d1
+    cmp 1,d1
+    bne 1f
+    movbu (35,a3),d3
+    movbu (36,a3),d2
+    movbu (37,a3),d0
+1:
+    call apply_hms_common,[d2,d3,a2,a3],20
+
+    movbu (45,a3),d0
+    cmp 1,d0
+    bne 2f
+    /* mono */
+    mov SID_CC_VIVID,d0
+    mov VIVID_MIN,d1
+    call set_cc_param,[d2,d3,a2,a3],20
+    ret [d2,d3,a2,a3],20
+2:
+    /* S (+ chroma), hue, light, all x strength, and P_HLON: sd_loader look_fill (Section 2) */
+    call look_fill,[d2,d3,a2,a3],20
+    mov 1,d0
+    movbu d0,(P_ACTIVE,a2)
+    /* Color Creator's own processing still runs (its hue control acts on the image), so reset its
+     * vividness to neutral 0: otherwise a mono look's -4 stays and every later look renders B&W. */
+    mov SID_CC_VIVID,d0
+    clr d1
+    call set_cc_param,[d2,d3,a2,a3],20
+    ret [d2,d3,a2,a3],20
+
+/* Helper: apply_hms_common (d3 = hl, d2 = mid, d0 = sh) -> P cache + request tone 384 / 692 / 383. */
+apply_hms_common:
+    mov d0,a3
+    extb d3
+    movbu d3,(P_HL,a2)
+    mov d3,d1
+    mov SID_TONE_HL,d0
+    call set_setting_facade,[d2,d3,a2,a3],20
+
+    extb d2
+    movbu d2,(P_MID,a2)
+    mov d2,d1
+    mov SID_TONE_MID,d0
+    call set_setting_facade,[d2,d3,a2,a3],20
+
+    mov a3,d3
+    extb d3
+    movbu d3,(P_SH,a2)
+    mov d3,d1
+    mov SID_TONE_SH,d0
+    call set_setting_facade,[d2,d3,a2,a3],20
+    ret [d2,d3,a2,a3],20
+
+
+/* =========================================================================
+ * 8. scp_cc_label: Super Control Panel Color Creator cell text
+ * Hooked at 0x60e25ec8 (stock 0x60ee8cd1), entered with its own 136-byte frame:
+ * (0,sp) call slot, (16,sp) a1, (20,sp) view25, (24,sp) P, (40..,sp) UTF-16 text, regs at top.
+ * a0 = value record, a1 = &{view24, view25}. Without P the stock text stays.
+ * ========================================================================= */
+scp_cc_label:
+    mov a1,(16,sp)
+    call em1_scp_stock_format,[d2,d3,a2,a3],136
+    mov (16,sp),a1
+
+    mov (4,a1),a0
+    cmp 0,a0
+    beq scp_skip
+    mov a0,(20,sp)
+
+    call p_get,[d2,d3],12
+    cmp 0,a0
+    beq scp_skip
+    mov a0,(24,sp)
+
+    movhu (P_PAGE,a0),d0
+    cmp PG_FILM,d0
+    bne scp_page_mode
+
+    /* Page 0: active look name */
+    call look_name_ptr,[],4
+    mov sp,a3
+    add 40,a3
+    mov a3,a2
+    call copy_ascii_to_u16,[],4
+    clr d0
+    movhu d0,(a2)
+    mov a3,a1
+    bra scp_set_text
+
+scp_page_mode:
+.if CC_WHEEL
+    jmp cw_scp_label         /* a1 = label for the page, back at scp_set_text (section .cwui) */
+.else
+    and 3,d0
+    asl 2,d0
+    mov scp_page_ptrs,a1
+    add d0,a1
+    mov (a1),a1
+.endif
+
+scp_set_text:
+    mov (20,sp),a0
+    call em1_scp_text,[d2,d3,a2,a3],24
+
+scp_skip:
+    ret [d2,d3,a2,a3],136
+
+
+/* =========================================================================
+ * 10. DATA TABLES: Page Labels, Built-in Preset Names, and Preset Values
+ * With EM1_CC_WHEEL=1 they move to section .cwui (the gap): the Section 6 cave has no room for the wheel hooks.
+ * ========================================================================= */
+.if CC_WHEEL
+    .section .cwui,"ax"
+.endif
+.balign 4
+scp_page_ptrs:
+    .long u16_page0
+    .long u16_page1
+    .long u16_page2
+    .long u16_page3
+
+u16_page0:
+    .hword 'F','i','l','m',' ','L','o','o','k',0
+u16_page1:
+    .hword 'C','h','r','o','m','a',0
+u16_page2:
+    .hword 'L','u','m','i','n','a','n','c','e',0
+u16_page3:
+    .hword 'S','t','r','e','n','g','t','h',0
+
+.balign 4
+str_chroma:
+    .asciz "Chroma: "
+str_lum_h:
+    .asciz "Lum H:"
+str_lum_s:
+    .asciz " S:"
+str_strength:
+    .asciz "Strength x"
+str_str_vals:
+    .ascii "1\0\0\0" "1.5\0" "2\0\0\0" "3\0\0\0"
+
+/* builtin_looks (16 x 64-byte records) lives in the Section 5 FF tail (build.py BUILTIN_ADDR): Section 6
+ * loads only up to 0x612e7000, which this cave nearly fills. */
+
+.if HALO
+/* =========================================================================
+ * Halo page (page 4), in the 100 KB gap (section .hlui, build.py HALO_UI_ADDR): needs the halation patch's
+ * Section 6 loaded-end edit (check_loaded refuses a release without it).
+ * hl_ui_step: from cc_left_right_common (a2 = P, a3 = parent, d3 = -1 / +1, cc_left/right frame): step the
+ *   stage 0..3 (clamped; a stored value outside 0..3 counts as Off), store it with SetValue(961), redraw.
+ * hl_ui_guide: from cc_guide (a2 = text destination, cc_guide frame): "Halo Off|Low|Med|High", read back.
+ * ========================================================================= */
+    .section .hlui,"ax"
+hl_ui_step:
+    mov SID_HALO,d0
+    call get_setting_facade,[d2,d3,a2,a3],24
+    cmp 3,d0
+    bls 1f
+    clr d0
+1:
+    add d3,d0
+    cmp 0,d0
+    bge 2f
+    clr d0
+2:
+    cmp 3,d0
+    ble 3f
+    mov 3,d0
+3:
+    mov d0,d1
+    mov SID_HALO,d0
+    call set_setting_facade,[d2,d3,a2,a3],20
+    jmp cc_poke_child
+
+hl_ui_guide:
+    mov str_halo,a1
+    call copy_ascii_to_u16,[],4
+    mov SID_HALO,d0
+    call get_setting_facade,[d2,d3,a2,a3],24
+    cmp 3,d0
+    bls 1f
+    clr d0
+1:
+    asl 3,d0
+    mov str_halo_vals,a1
+    add d0,a1
+    call copy_ascii_to_u16,[],4
+    jmp guide_done
+
+str_halo:
+    .asciz "Halo "
+str_halo_vals:
+    .ascii "Off\0\0\0\0\0" "Low\0\0\0\0\0" "Med\0\0\0\0\0" "High\0\0\0\0"
+.endif
+
+.ifdef LOOKMEM
+.if HALO == 0
+.error "EM1_LOOKMEM needs EM1_CC_HALO=1 (its code is in the gap the halation patch loads)"
+.endif
+/* =========================================================================
+ * Look memory (build with EM1_CC_HALO=1 EM1_LOOKMEM=1; sd_loader built with EM1_LOOKMEM=1 first). Section .hlui.
+ * lm_ensure: replaces cc_init's p_ensure call; restores the remembered look (sd_loader look_restore, which ends a
+ *   colour look with the 618 live-view refresh) before cc_init compares the editor source, so opening the editor after
+ *   power-on keeps the remembered look instead of look 0.
+ * lm_apply_save: replaces step_film_profile's apply_active_look call (a2 = P); a look chosen with the arrows is
+ *   stored in sid 965 as 1 + look + 32 * (card), and P_LMEM stops a later restore from replacing it.
+ * A choice made with the arrows is stored, and so is cc_init's switch to card look 0 once the card is read (lm_ensure).
+ * Its automatic built-in look 0 is not, so opening the editor before the first half-press (card not read yet) does
+ * not forget a remembered card look.
+ * ========================================================================= */
+.equ SID_LOOKMEM,  965
+    .section .hlui,"ax"
+lm_ensure:
+    call p_ensure,[d2,d3,a2,a3],20
+    cmp 0,a0
+    beq 1f
+    mov a0,a2
+    call look_restore,[d2,d3,a2,a3],20
+    /* cc_init next switches the editor to card look 0 when LOOKS.BIN is loaded and the source is not the card yet
+     * (P_INIT != 2): remember that look, or the next power-on would restore one that is no longer shown. While the
+     * card is not read, nothing is stored, so a remembered card look survives the automatic built-in look 0. */
+    movhu (P_SD_STATE,a2),d0
+    cmp 1,d0
+    bne 2f
+    movhu (P_INIT,a2),d0
+    cmp LOOK_SOURCE_CARD,d0
+    beq 2f
+    mov 1,d0
+    movbu d0,(P_LMEM,a2)
+    mov SID_LOOKMEM,d0
+    mov 1+32,d1                     /* card look 0 */
+    call set_setting_facade,[d2,d3,a2,a3],20
+2:
+    mov a2,a0
+1:
+    ret [d2,d3,a2,a3],20
+
+lm_apply_save:
+    call apply_active_look,[d2,d3,a2,a3],20
+    mov 1,d0
+    movbu d0,(P_LMEM,a2)
+    movhu (P_LOOK,a2),d1
+    and 31,d1
+    movhu (P_INIT,a2),d0
+    cmp LOOK_SOURCE_CARD,d0
+    bne 1f
+    add 32,d1
+1:
+    inc d1
+    mov SID_LOOKMEM,d0
+    call set_setting_facade,[d2,d3,a2,a3],20
+    ret [d2,d3,a2,a3],20
+.endif
+
+.if CC_WHEEL
+/* =========================================================================
+ * Wheel page (EM1_CC_WHEEL=1; section .cwui in the 100 KB gap, build.py CW_UI_ADDR; needs the halation load-end
+ * edit and ../color_wheel's cw_get, which feeds the look's axis to the stock producer while P_WON = 1).
+ *
+ * C3d surface switching (plans/reports/research-261127-1557-em1ii-color-wheel-osd.md, Phase 01): the fwOpe API
+ * object comes from em1_fw_iface (0x6082602c, as the stock GUI 0x60f09d40 / 0x60f09e18 gets it); vtable slots
+ * +32 stopVariousDraw(type), +28 startVariousDraw(type), +48 drawC3dAsync(5), each called `calls (slot)` with
+ * a0 = object, d0 = type, d1 = 2 if the GUI's flag 0x61fbfbcc is set else 1 (the value the GUI pairs with it),
+ * a1 = a zeroed 32-byte block. Opening a surface while another is open hangs the C3d API task, so every start is
+ * preceded by the stop of the open one:
+ *   enter (Film -> Wheel):      P_WAXIS = 0 (S), P_WCUR = 255, P_WON = 1; stop 0 -> start 4 -> draw
+ *   axis (Down or TRASH on Wheel): P_WAXIS S -> H -> L -> S; draw
+ *   leave (Wheel -> Chroma, OK, any other parent event): P_WON = 0; stop 4 -> start 0 -> draw
+ * cw_leave does nothing while P_WON = 0, so it is safe on every path. cc_init clears P_WON without calling fwOpe
+ * (the GUI itself starts type 0 for the editor's screen).
+ * ========================================================================= */
+.equ FW_SLOT_START, 28
+.equ FW_SLOT_STOP,  32
+.equ FW_SLOT_DRAW,  48
+.equ FW_TYPE_CC,    0                /* kind 1: Color Creator ring */
+.equ FW_TYPE_WHEEL, 4                /* kind 5: COLOR wheel polygon */
+.equ FW_DRAW,       5                /* drawC3dAsync accepts type 5 only */
+.equ GUI_DISP2,     0x61fbfbcc       /* GUI: 1 while its last start used d1 = 2 */
+.global cw_ok
+    .section .cwui,"ax"
+
+/* cw_fw (d0 = type, d1 = slot offset): one fwOpe API call. Entered `call cw_fw,[d2,d3,a2,a3],56`:
+ * (0,sp) call slot, (4..35,sp) argument block, saved regs above. */
+cw_fw:
+    mov d0,d2
+    mov d1,d3
+    mov sp,a0
+    add 4,a0
+    clr d0
+    mov 8,d1
+1:
+    mov d0,(a0)
+    add 4,a0
+    add -1,d1
+    bne 1b
+    call em1_fw_iface,[],4           /* a0 = fwOpe API object */
+    mov (a0),a2
+    add d3,a2
+    mov (a2),a2
+    mov (GUI_DISP2),d1
+    cmp 0,d1
+    beq 2f
+    mov 2,d1
+    bra 3f
+2:
+    mov 1,d1
+3:
+    mov d2,d0
+    mov sp,a1
+    add 4,a1
+    calls (a2)
+    ret [d2,d3,a2,a3],56
+
+/* cw_enter (a2 = P, d2 = axis 0..2) */
+cw_enter:
+    movbu d2,(P_WAXIS,a2)
+    mov 255,d0
+    movbu d0,(P_WCUR,a2)
+    mov 1,d0
+    movbu d0,(P_WON,a2)
+    mov FW_TYPE_CC,d0
+    mov FW_SLOT_STOP,d1
+    call cw_fw,[d2,d3,a2,a3],56
+    mov FW_TYPE_WHEEL,d0
+    mov FW_SLOT_START,d1
+    call cw_fw,[d2,d3,a2,a3],56
+    mov FW_DRAW,d0
+    mov FW_SLOT_DRAW,d1
+    call cw_fw,[d2,d3,a2,a3],56
+    ret [d2,d3,a2,a3],20
+
+/* cw_leave (a2 = P): back to the Color Creator ring if the wheel is up */
+cw_leave:
+    movbu (P_WON,a2),d0
+    cmp 0,d0
+    beq 1f
+    clr d0
+    movbu d0,(P_WON,a2)
+    mov FW_TYPE_WHEEL,d0
+    mov FW_SLOT_STOP,d1
+    call cw_fw,[d2,d3,a2,a3],56
+    mov FW_TYPE_CC,d0
+    mov FW_SLOT_START,d1
+    call cw_fw,[d2,d3,a2,a3],56
+    mov FW_DRAW,d0
+    mov FW_SLOT_DRAW,d1
+    call cw_fw,[d2,d3,a2,a3],56
+1:
+    ret [d2,d3,a2,a3],20
+
+/* cw_next_page (a2 = P): P_PAGE + 1 (wrap); entering the Wheel page starts the wheel on S, any other page leaves
+ * it (cw_leave does nothing when it is not up). */
+cw_next_page:
+    movhu (P_PAGE,a2),d0
+    inc d0
+    cmp N_PAGES,d0
+    bcs 1f
+    clr d0
+1:
+    movhu d0,(P_PAGE,a2)
+    cmp PG_WHEEL,d0
+    bne 2f
+    clr d2                           /* axis S */
+    call cw_enter,[d2,d3,a2,a3],20
+    ret [d2,d3,a2,a3],20
+2:
+    call cw_leave,[d2,d3,a2,a3],20
+    ret [d2,d3,a2,a3],20
+
+/* cw_down: from cc_up_down_common on the Wheel page (cc_up/cc_down frame: a2 = P, d3 = +1 Up / -1 Down).
+ * The Down arrow steps P_WAXIS S -> H -> L -> S and redraws (no stop / start). Up and the rear dial (the stock dial
+ * loop calls cc_up/cc_down per detent with P_DIAL = 1) do nothing. Returns 1 like the other pages.
+ * cw_axis: the step itself, also reached from cw_page (TRASH on the Wheel page) with the same frame. */
+cw_down:
+    cmp 0,d3
+    bge 1f
+    movbu (P_DIAL,a2),d0
+    cmp 0,d0
+    bne 1f
+cw_axis:
+    movbu (P_WAXIS,a2),d0
+    inc d0
+    cmp 3,d0
+    bcs 2f
+    clr d0
+2:
+    movbu d0,(P_WAXIS,a2)
+    movbu (P_WON,a2),d0
+    cmp 0,d0
+    beq 1f
+    mov FW_DRAW,d0
+    mov FW_SLOT_DRAW,d1
+    call cw_fw,[d2,d3,a2,a3],56
+1:
+    jmp cc_ret1
+
+/* cw_page: record+36 (calls entry: a0 = parent, d0 = event, d1 = arg). TRASH (0x9016) on the Wheel page steps the
+ * axis like Down (as Delete does on the E-P7 / PEN-F wheel); TRASH elsewhere steps the page (cc_info, as before);
+ * any other event leaves the wheel and goes to stock (cw_event). Frame 28 as cc_up / cc_down. */
+cw_page:
+    cmp 0x9016,d0
+    bne cw_event
+    movm [d2,d3,a2,a3],(sp)
+    add -12,sp
+    mov a0,a3
+    mov d0,(4,sp)
+    mov d1,(8,sp)
+    call p_get,[d2,d3],12
+    cmp 0,a0
+    beq 1f
+    mov a0,a2
+    movhu (P_PAGE,a2),d2
+    cmp PG_WHEEL,d2
+    bne 1f
+    jmp cw_axis
+1:
+    mov a3,a0
+    mov (4,sp),d0
+    mov (8,sp),d1
+    add 12,sp
+    movm (sp),[d2,d3,a2,a3]
+    jmp cc_info
+
+/* cw_pre_exit: calls-entered wrapper body shared by cw_event / cw_ok. Leaves the wheel (and goes back to Film)
+ * with d0, d1, a0, MDR and the stack as at entry, then jumps to the stock handler in a1. On record+36 events
+ * (cw_event: 0x900d, 0x903e, 0x900e, 0x972b and the stock default branch, some of which keep the editor open) the
+ * children and view are refreshed as on a page step, so the screen shows Film rather than a stale "Wheel S". */
+cw_event:
+    mov em1_cc_page,a1
+    bra cw_pre_exit
+cw_ok:
+    mov em1_cc_ok,a1
+cw_pre_exit:
+    movm [d2,d3,a2,a3],(sp)
+    add -24,sp                       /* (0,sp) call slot of our calls; (4..23,sp) saved d0, d1, a0, a1, MDR */
+    mov d0,(4,sp)
+    mov d1,(8,sp)
+    mov a0,(12,sp)
+    mov a1,(16,sp)
+    mov mdr,d0
+    mov d0,(20,sp)
+    call p_get,[d2,d3],12
+    cmp 0,a0
+    beq 1f
+    mov a0,a2
+    movbu (P_WON,a2),d0
+    cmp 0,d0
+    beq 1f
+    call cw_leave,[d2,d3,a2,a3],20
+    clr d0
+    movhu d0,(P_PAGE,a2)             /* PG_FILM */
+    mov (16,sp),d0
+    cmp em1_cc_page,d0
+    bne 1f                           /* OK: the stock commit runs as before */
+    mov (12,sp),a3                   /* parent */
+    call sync_children_and_view,[d2,d3,a2,a3],20
+1:
+    mov (20,sp),d0
+    mov d0,mdr
+    mov (4,sp),d0
+    mov (8,sp),d1
+    mov (12,sp),a0
+    mov (16,sp),a1
+    add 24,sp
+    movm (sp),[d2,d3,a2,a3]
+    jmp (a1)
+
+/* cw_guide: from cc_guide (a2 = text destination, (12,sp) = P): "Wheel S " + look name */
+cw_guide:
+    mov str_wheel,a1
+    call copy_ascii_to_u16,[],4
+    mov (12,sp),a0
+    movbu (P_WAXIS,a0),d1
+    cmp 3,d1
+    bcs 1f
+    clr d1
+1:
+    mov str_wheel_axes,a1
+    add d1,a1
+    movbu (a1),d1
+    movhu d1,(a2)
+    mov 0x20,d1
+    movhu d1,(2,a2)
+    add 4,a2
+    mov (12,sp),a0
+    call look_name_ptr,[],4
+    call copy_ascii_to_u16,[],4
+    jmp guide_done
+
+/* cw_scp_label: from scp_cc_label (d0 = page, not Film) -> a1 = SCP label, back at scp_set_text */
+cw_scp_label:
+    mov u16_wheel,a1
+    cmp PG_WHEEL,d0
+    beq 2f
+    add -(PG_CHROMA - 1),d0          /* Chroma, Luminance, Strength -> scp_page_ptrs 1..3; Halo -> 0 as before */
+    and 3,d0
+    asl 2,d0
+    mov scp_page_ptrs,a1
+    add d0,a1
+    mov (a1),a1
+2:
+    jmp scp_set_text
+
+str_wheel:
+    .asciz "Wheel "
+str_wheel_axes:
+    .ascii "SHL"
+.balign 2
+u16_wheel:
+    .hword 'C','o','l','o','r',' ','W','h','e','e','l',0
+.endif
